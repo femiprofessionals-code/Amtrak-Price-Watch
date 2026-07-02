@@ -8,7 +8,15 @@ import { Field, Input, Label } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { FormMessage } from "./form-message";
 
-export function LoginForm({ next }: { next?: string }) {
+export function LoginForm({
+  next,
+  googleEnabled,
+  oauthError,
+}: {
+  next?: string;
+  googleEnabled?: boolean;
+  oauthError?: string;
+}) {
   const [state, formAction, pending] = useActionState(login, null);
 
   return (
@@ -18,7 +26,13 @@ export function LoginForm({ next }: { next?: string }) {
         <p className="text-sm text-muted-foreground">Log in to keep an eye on your fares.</p>
       </div>
 
-      <GoogleButton />
+      {oauthError && (
+        <p role="alert" className="rounded-lg bg-danger-soft p-3 text-sm font-medium text-danger">
+          {oauthError}
+        </p>
+      )}
+
+      <GoogleButton enabled={googleEnabled} next={next} />
       <OrDivider />
 
       <form action={formAction} className="space-y-4" noValidate>
@@ -81,13 +95,25 @@ export function LoginForm({ next }: { next?: string }) {
   );
 }
 
-export function GoogleButton() {
+export function GoogleButton({ enabled, next }: { enabled?: boolean; next?: string }) {
+  if (!enabled) {
+    return (
+      <Button type="button" variant="outline" className="w-full" disabled title="Coming soon">
+        <GoogleIcon />
+        Continue with Google
+        <Badge variant="primary">Coming soon</Badge>
+      </Button>
+    );
+  }
+  const href = next ? `/api/auth/google?next=${encodeURIComponent(next)}` : "/api/auth/google";
   return (
-    <Button type="button" variant="outline" className="w-full" disabled title="Coming soon">
+    <a
+      href={href}
+      className="inline-flex h-10 w-full items-center justify-center gap-2 rounded-lg border border-border bg-card px-4 text-sm font-medium text-foreground shadow-soft transition-all duration-150 hover:bg-muted active:scale-[0.98]"
+    >
       <GoogleIcon />
       Continue with Google
-      <Badge variant="primary">Coming soon</Badge>
-    </Button>
+    </a>
   );
 }
 

@@ -7,7 +7,7 @@ Built with **Next.js 16 (App Router) · React 19 · TypeScript · Tailwind CSS v
 ## Features
 
 - **Landing page** — hero, animated stats, features, how-it-works, FAQ, testimonials, dark/light mode
-- **Authentication** — email + password (bcrypt), JWT session cookies, email verification, forgot/reset password, social-login-ready UI
+- **Authentication** — email + password (bcrypt), JWT session cookies, email verification, forgot/reset password, and Google sign-in (OAuth 2.0)
 - **Dashboard** — overview cards (active alerts, price drops, lowest price, avg. savings), price history chart, recent alerts & notifications, quick actions
 - **Alerts** — 4-step creation wizard (route → travel details → price target → review) with live fare estimate, list with search/filter/status tabs, detail page with SVG price chart and check history, edit / pause / resume / delete / check-now
 - **Price monitoring engine** — scheduled fare checks, price history recording, target comparison, duplicate-notification prevention, automatic expiry of past travel dates
@@ -66,6 +66,13 @@ npm run dev
 | `EMAIL_FROM` | Verified sender, e.g. `Travel Price Watch <alerts@yourdomain.com>` |
 | `NEXT_PUBLIC_APP_URL` | Public base URL used in email links |
 | `CRON_SECRET` | Shared secret protecting the monitoring endpoint |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Optional — enables "Continue with Google". Create an OAuth client at [console.cloud.google.com/apis/credentials](https://console.cloud.google.com/apis/credentials) with authorized redirect URI `<NEXT_PUBLIC_APP_URL>/api/auth/google/callback`. When unset, the button shows as "Coming soon" |
+
+### Google sign-in behavior
+
+- New Google users get an account with a verified email and no password (they can set one later in Settings).
+- If a Google sign-in matches an existing email/password account, the accounts are linked automatically.
+- The flow is a standard server-side authorization-code exchange (`/api/auth/google` → Google → `/api/auth/google/callback`) with a state cookie for CSRF protection — no client-side SDK.
 
 ## Price monitoring
 

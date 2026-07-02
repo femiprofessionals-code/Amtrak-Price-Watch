@@ -47,7 +47,7 @@ export default async function SettingsPage() {
           <CardDescription>Use at least 8 characters.</CardDescription>
         </CardHeader>
         <CardContent>
-          <PasswordForm />
+          <PasswordForm hasPassword={user.passwordHash != null} />
         </CardContent>
       </Card>
 

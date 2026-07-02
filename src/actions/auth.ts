@@ -62,7 +62,9 @@ export async function login(_prev: ActionState, formData: FormData): Promise<Act
   if (!parsed.success) return { fieldErrors: fieldErrorsFromZod(parsed.error.issues) };
 
   const user = await db.user.findUnique({ where: { email: parsed.data.email } });
-  const valid = user && (await verifyPassword(parsed.data.password, user.passwordHash));
+  // Google-only accounts have no password hash; fail with the same generic message.
+  const valid =
+    user?.passwordHash != null && (await verifyPassword(parsed.data.password, user.passwordHash));
   if (!valid) return { error: "Invalid email or password" };
 
   await createSession(user.id);
