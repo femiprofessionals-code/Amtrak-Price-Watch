@@ -9,7 +9,7 @@ import { FormMessage } from "./form-message";
 import { PasswordStrength } from "./password-strength";
 import { GoogleButton, OrDivider } from "./login-form";
 
-export function RegisterForm({ googleEnabled }: { googleEnabled?: boolean }) {
+export function RegisterForm() {
   const [state, formAction, pending] = useActionState(register, null);
   const [password, setPassword] = useState("");
 
@@ -20,7 +20,7 @@ export function RegisterForm({ googleEnabled }: { googleEnabled?: boolean }) {
         <p className="text-sm text-muted-foreground">Start tracking Amtrak fares in under a minute.</p>
       </div>
 
-      <GoogleButton enabled={googleEnabled} />
+      <GoogleButton />
       <OrDivider />
 
       <form action={formAction} className="space-y-4" noValidate>

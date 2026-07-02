@@ -51,10 +51,7 @@ export const profileSchema = z.object({
 });
 
 export const changePasswordSchema = z.object({
-  // Optional at the schema level: accounts created via Google sign-in set
-  // their first password without one. The action enforces it when a
-  // password already exists.
-  currentPassword: z.string().optional(),
+  currentPassword: z.string().min(1, "Current password is required"),
   newPassword: passwordSchema,
 });
 

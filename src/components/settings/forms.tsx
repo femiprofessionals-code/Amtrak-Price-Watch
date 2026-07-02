@@ -47,32 +47,24 @@ export function ProfileForm({ defaults }: { defaults: { name: string; email: str
   );
 }
 
-export function PasswordForm({ hasPassword = true }: { hasPassword?: boolean }) {
+export function PasswordForm() {
   const [state, formAction, pending] = useActionState(changePassword, null);
   useToastOnResult(state);
 
   return (
     <form action={formAction} className="space-y-4">
-      {!hasPassword && (
-        <p className="rounded-lg bg-primary-soft p-3 text-sm text-primary">
-          You signed up with Google, so there&apos;s no password yet — set one below to also log
-          in with email.
-        </p>
-      )}
-      {hasPassword && (
-        <Field label="Current password" error={state?.fieldErrors?.currentPassword}>
-          {(p) => (
-            <Input {...p} name="currentPassword" type="password" autoComplete="current-password" error={state?.fieldErrors?.currentPassword} />
-          )}
-        </Field>
-      )}
+      <Field label="Current password" error={state?.fieldErrors?.currentPassword}>
+        {(p) => (
+          <Input {...p} name="currentPassword" type="password" autoComplete="current-password" error={state?.fieldErrors?.currentPassword} />
+        )}
+      </Field>
       <Field label="New password" error={state?.fieldErrors?.newPassword}>
         {(p) => (
           <Input {...p} name="newPassword" type="password" autoComplete="new-password" error={state?.fieldErrors?.newPassword} />
         )}
       </Field>
       <div className="flex justify-end">
-        <Button type="submit" loading={pending}>{hasPassword ? "Change password" : "Set password"}</Button>
+        <Button type="submit" loading={pending}>Change password</Button>
       </div>
     </form>
   );

@@ -35,10 +35,7 @@ enum NotificationType {
 model User {
   id                  String    @id @default(cuid())
   email               String    @unique
-  /// Null for accounts created via Google sign-in that never set a password.
-  passwordHash        String?
-  /// Google account subject (`sub`) for OAuth sign-in.
-  googleId            String?   @unique
+  passwordHash        String
   name                String
   emailVerifiedAt     DateTime?
   emailOnPriceDrop    Boolean   @default(true)

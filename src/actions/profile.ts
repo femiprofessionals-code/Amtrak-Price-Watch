@@ -40,19 +40,13 @@ export async function changePassword(_prev: ActionState, formData: FormData): Pr
   const user = await requireUser();
 
   const parsed = changePasswordSchema.safeParse({
-    currentPassword: formData.get("currentPassword") ?? undefined,
+    currentPassword: formData.get("currentPassword"),
     newPassword: formData.get("newPassword"),
   });
   if (!parsed.success) return { fieldErrors: fieldErrorsFromZod(parsed.error.issues) };
 
-  // Google-only accounts (no password yet) may set one directly.
-  if (user.passwordHash != null) {
-    if (!parsed.data.currentPassword) {
-      return { fieldErrors: { currentPassword: "Current password is required" } };
-    }
-    const valid = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
-    if (!valid) return { fieldErrors: { currentPassword: "Current password is incorrect" } };
-  }
+  const valid = await verifyPassword(parsed.data.currentPassword, user.passwordHash);
+  if (!valid) return { fieldErrors: { currentPassword: "Current password is incorrect" } };
 
   await db.user.update({
     where: { id: user.id },
