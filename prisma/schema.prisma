@@ -1,0 +1,154 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider = "postgresql"
+}
+
+enum Provider {
+  AMTRAK
+}
+
+enum SeatClass {
+  COACH
+  BUSINESS
+  FIRST
+  ROOMETTE
+}
+
+enum AlertStatus {
+  ACTIVE
+  PAUSED
+  TRIGGERED
+  EXPIRED
+}
+
+enum NotificationType {
+  PRICE_DROP
+  ALERT_CREATED
+  ALERT_UPDATED
+  SYSTEM
+}
+
+model User {
+  id                  String    @id @default(cuid())
+  email               String    @unique
+  passwordHash        String
+  name                String
+  emailVerifiedAt     DateTime?
+  emailOnPriceDrop    Boolean   @default(true)
+  emailOnAlertUpdates Boolean   @default(true)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  alerts        Alert[]
+  notifications Notification[]
+  authTokens    AuthToken[]
+}
+
+/// Single-use tokens for email verification and password reset.
+model AuthToken {
+  id        String        @id @default(cuid())
+  userId    String
+  tokenHash String        @unique
+  purpose   TokenPurpose
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, purpose])
+}
+
+enum TokenPurpose {
+  VERIFY_EMAIL
+  RESET_PASSWORD
+}
+
+model Station {
+  id    String @id @default(cuid())
+  code  String @unique /// Amtrak station code, e.g. "NYP"
+  name  String
+  city  String
+  state String
+
+  originRoutes      Route[] @relation("origin")
+  destinationRoutes Route[] @relation("destination")
+}
+
+model Route {
+  id            String   @id @default(cuid())
+  provider      Provider @default(AMTRAK)
+  originId      String
+  destinationId String
+
+  origin      Station @relation("origin", fields: [originId], references: [id])
+  destination Station @relation("destination", fields: [destinationId], references: [id])
+  alerts      Alert[]
+
+  @@unique([provider, originId, destinationId])
+}
+
+model Alert {
+  id         String      @id @default(cuid())
+  userId     String
+  routeId    String
+  travelDate DateTime    @db.Date
+  passengers Int         @default(1)
+  seatClass  SeatClass   @default(COACH)
+  status     AlertStatus @default(ACTIVE)
+
+  /// All prices are stored as integer cents (per ticket).
+  targetPriceCents  Int
+  currentPriceCents Int?
+  lowestPriceCents  Int?
+
+  /// Also notify on any price drop, not just when target is reached.
+  notifyOnAnyDrop Boolean @default(false)
+
+  /// Price at which the user was last notified — prevents duplicate emails.
+  lastNotifiedPriceCents Int?
+
+  lastCheckedAt DateTime?
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  user         User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  route        Route          @relation(fields: [routeId], references: [id])
+  priceHistory PriceHistory[]
+  notifications Notification[]
+
+  @@index([userId, status])
+  @@index([status, lastCheckedAt])
+}
+
+model PriceHistory {
+  id         String   @id @default(cuid())
+  alertId    String
+  priceCents Int
+  recordedAt DateTime @default(now())
+
+  alert Alert @relation(fields: [alertId], references: [id], onDelete: Cascade)
+
+  @@index([alertId, recordedAt])
+}
+
+model Notification {
+  id        String           @id @default(cuid())
+  userId    String
+  alertId   String?
+  type      NotificationType
+  title     String
+  body      String
+  readAt    DateTime?
+  createdAt DateTime         @default(now())
+
+  user  User   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  alert Alert? @relation(fields: [alertId], references: [id], onDelete: SetNull)
+
+  @@index([userId, createdAt(sort: Desc)])
+  @@index([userId, readAt])
+}

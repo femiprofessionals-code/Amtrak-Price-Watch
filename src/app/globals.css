@@ -1,0 +1,137 @@
+@import "tailwindcss";
+
+@variant dark (&:where(.dark, .dark *));
+
+:root {
+  --background: #fafafa;
+  --foreground: #18181b;
+  --card: #ffffff;
+  --card-foreground: #18181b;
+  --muted: #f4f4f5;
+  --muted-foreground: #71717a;
+  --border: #e4e4e7;
+  --input: #e4e4e7;
+  --primary: #4f46e5;
+  --primary-hover: #4338ca;
+  --primary-foreground: #ffffff;
+  --primary-soft: #eef2ff;
+  --success: #059669;
+  --success-soft: #ecfdf5;
+  --danger: #dc2626;
+  --danger-soft: #fef2f2;
+  --warning: #d97706;
+  --warning-soft: #fffbeb;
+  --ring: #6366f1;
+
+  --shadow-soft: 0 1px 2px rgb(24 24 27 / 0.04), 0 4px 16px rgb(24 24 27 / 0.06);
+  --shadow-lifted: 0 2px 4px rgb(24 24 27 / 0.05), 0 12px 32px rgb(24 24 27 / 0.1);
+}
+
+.dark {
+  --background: #09090b;
+  --foreground: #f4f4f5;
+  --card: #111113;
+  --card-foreground: #f4f4f5;
+  --muted: #1c1c1f;
+  --muted-foreground: #a1a1aa;
+  --border: #26262a;
+  --input: #2e2e33;
+  --primary: #6366f1;
+  --primary-hover: #818cf8;
+  --primary-foreground: #ffffff;
+  --primary-soft: #1e1b4b;
+  --success: #34d399;
+  --success-soft: #052e21;
+  --danger: #f87171;
+  --danger-soft: #3f1212;
+  --warning: #fbbf24;
+  --warning-soft: #3b2a08;
+  --ring: #818cf8;
+
+  --shadow-soft: 0 1px 2px rgb(0 0 0 / 0.4), 0 4px 16px rgb(0 0 0 / 0.35);
+  --shadow-lifted: 0 2px 4px rgb(0 0 0 / 0.45), 0 12px 32px rgb(0 0 0 / 0.5);
+}
+
+@theme inline {
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-primary: var(--primary);
+  --color-primary-hover: var(--primary-hover);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-primary-soft: var(--primary-soft);
+  --color-success: var(--success);
+  --color-success-soft: var(--success-soft);
+  --color-danger: var(--danger);
+  --color-danger-soft: var(--danger-soft);
+  --color-warning: var(--warning);
+  --color-warning-soft: var(--warning-soft);
+  --color-ring: var(--ring);
+
+  --font-sans: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-geist-mono), ui-monospace, monospace;
+
+  --shadow-soft: var(--shadow-soft);
+  --shadow-lifted: var(--shadow-lifted);
+
+  --animate-fade-in: fade-in 0.35s ease both;
+  --animate-fade-up: fade-up 0.45s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-scale-in: scale-in 0.2s cubic-bezier(0.16, 1, 0.3, 1) both;
+  --animate-shimmer: shimmer 1.6s linear infinite;
+  --animate-toast-in: toast-in 0.3s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.96); }
+  to { opacity: 1; transform: scale(1); }
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
+}
+@keyframes toast-in {
+  from { opacity: 0; transform: translateY(10px) scale(0.97); }
+  to { opacity: 1; transform: translateY(0) scale(1); }
+}
+
+@layer base {
+  * {
+    border-color: var(--border);
+  }
+  body {
+    background: var(--background);
+    color: var(--foreground);
+    font-family: var(--font-sans);
+    text-rendering: optimizeLegibility;
+  }
+  :focus-visible {
+    outline: 2px solid var(--ring);
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+  ::selection {
+    background: var(--primary);
+    color: var(--primary-foreground);
+  }
+  @media (prefers-reduced-motion: reduce) {
+    *, *::before, *::after {
+      animation-duration: 0.01ms !important;
+      animation-iteration-count: 1 !important;
+      transition-duration: 0.01ms !important;
+      scroll-behavior: auto !important;
+    }
+  }
+}
