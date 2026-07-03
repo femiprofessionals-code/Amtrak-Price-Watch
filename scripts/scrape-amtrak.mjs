@@ -133,30 +133,45 @@ async function fillStation(page, ariaLabel, city, code) {
   await page.keyboard.type(city, { delay: 110 });
   await page.waitForTimeout(2800);
 
-  // Select via Playwright's NATIVE click — it dispatches trusted pointer events
-  // (which Angular Material requires to commit) and only matches the visible
-  // option, sidestepping Amtrak's duplicate #station-listbox ids.
-  const byCode = page.getByRole("option", { name: new RegExp(`\\(${code}\\)`) }).first();
-  const anyVisible = page.locator('[role="option"]:visible').first();
-  let target = null;
-  if (await byCode.count()) target = byCode;
-  else if (await anyVisible.count()) target = anyVisible;
+  // Diagnostic: dump the geometry of the option matching `code` and its
+  // descendants, plus what element actually sits at its on-screen center —
+  // to find the real clickable target behind Amtrak's 0-size [role=option].
+  const geo = await page.evaluate((code) => {
+    const opts = [...document.querySelectorAll('#station-listbox [role="option"], #station-listbox li, [role="option"]')];
+    const opt = opts.find((el) => (el.textContent || "").toUpperCase().includes(code)) || opts[0];
+    if (!opt) return { found: false, total: opts.length };
+    const rect = opt.getBoundingClientRect();
+    const kids = [...opt.querySelectorAll("*")].slice(0, 6).map((k) => {
+      const r = k.getBoundingClientRect();
+      return { tag: k.tagName.toLowerCase(), w: Math.round(r.width), h: Math.round(r.height), x: Math.round(r.x), y: Math.round(r.y) };
+    });
+    // Largest descendant (likely the visible clickable row).
+    let big = opt, bigA = 0;
+    for (const k of opt.querySelectorAll("*")) {
+      const r = k.getBoundingClientRect();
+      if (r.width * r.height > bigA) { bigA = r.width * r.height; big = k; }
+    }
+    const br = big.getBoundingClientRect();
+    return {
+      found: true,
+      total: opts.length,
+      optTag: opt.tagName.toLowerCase(),
+      optRect: { w: Math.round(rect.width), h: Math.round(rect.height), x: Math.round(rect.x), y: Math.round(rect.y) },
+      kids,
+      biggest: { tag: big.tagName.toLowerCase(), w: Math.round(br.width), h: Math.round(br.height), cx: Math.round(br.x + br.width / 2), cy: Math.round(br.y + br.height / 2) },
+    };
+  }, code);
+  log(`    [field ${ariaLabel}] optgeo: ${JSON.stringify(geo)}`);
 
-  if (!target) {
-    log(`    [field ${ariaLabel}] no visible option — ArrowDown+Enter fallback`);
+  // Try clicking at the center of the biggest visible descendant via mouse.
+  if (geo.found && geo.biggest.w > 0 && geo.biggest.h > 0) {
+    await page.mouse.click(geo.biggest.cx, geo.biggest.cy);
+    log(`    [field ${ariaLabel}] mouse-clicked biggest descendant @${geo.biggest.cx},${geo.biggest.cy}`);
+  } else {
+    // Everything is 0-size: fall back to keyboard commit.
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
-    return false;
-  }
-
-  const text = await target.textContent().catch(() => "");
-  try {
-    await target.click({ timeout: 8000 });
-    log(`    [field ${ariaLabel}] clicked option: ${JSON.stringify((text || "").replace(/\s+/g, " ").trim().slice(0, 60))}`);
-  } catch (e) {
-    log(`    [field ${ariaLabel}] native click failed: ${e.message?.slice(0, 90)} — ArrowDown+Enter`);
-    await page.keyboard.press("ArrowDown");
-    await page.keyboard.press("Enter");
+    log(`    [field ${ariaLabel}] all 0-size — ArrowDown+Enter`);
   }
   await page.waitForTimeout(900);
   return true;
