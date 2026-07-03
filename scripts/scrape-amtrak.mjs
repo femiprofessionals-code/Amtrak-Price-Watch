@@ -94,40 +94,64 @@ function extractFaresFromHtml(html) {
  * one billed request per scrape. The residential IP should un-neuter the
  * booking app that Amtrak degrades for datacenter IPs.
  */
-async function scrapeViaScrapingBee(origin, destination, date) {
+async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
   const [y, mo, d] = date.split("-");
-  const target =
-    `https://www.amtrak.com/tickets/departure.html?wdf_origin=${origin}` +
-    `&wdf_destination=${destination}&departureDate=${mo}-${d}-${y}&numAdults=1`;
+  const fromCity = cityHints[origin] || origin;
+  const toCity = cityHints[destination] || destination;
+
+  // Drive Amtrak's booking form inside ScrapingBee's residential browser.
+  // fill() fires real input events (populates the autocomplete); we then pick
+  // the option matching the station code and submit. evaluate() steps return
+  // diagnostics via evaluate_results (json_response=true).
+  const pick = (code) =>
+    `(function(){var o=[].slice.call(document.querySelectorAll('#station-listbox [role=option], #station-listbox li'));` +
+    `var m=o.filter(function(e){return (e.textContent||'').toUpperCase().indexOf('${code}')>-1})[0]||o[0];` +
+    `if(!m)return 'noopts:'+o.length;var r=m.getBoundingClientRect();m.click();` +
+    `return 'picked:'+(m.textContent||'').replace(/\\s+/g,' ').trim().slice(0,40)+'|wh='+Math.round(r.width)+'x'+Math.round(r.height);})()`;
+
+  const jsScenario = {
+    instructions: [
+      { wait: 8000 },
+      { fill: ['input[aria-label="From station"]', fromCity] },
+      { wait: 3500 },
+      { evaluate: pick(origin) },
+      { wait: 1200 },
+      { fill: ['input[aria-label="To station"]', toCity] },
+      { wait: 3500 },
+      { evaluate: pick(destination) },
+      { wait: 1200 },
+      { fill: ['input[placeholder="MM/DD/YYYY"]', `${mo}/${d}/${y}`] },
+      { wait: 800 },
+      { evaluate: `(function(){var b=document.querySelector('button[type=submit][aria-label="FIND TRIP"]');if(b){b.click();return 'submitted'}return 'nosubmit'})()` },
+      { wait: 12000 },
+      { evaluate: `(function(){return (document.body.innerText.match(/\\$\\s?\\d{2,4}/g)||[]).slice(0,10).join(',')||'noprices'})()` },
+    ],
+  };
 
   const params = new URLSearchParams({
     api_key: SCRAPINGBEE_API_KEY,
-    url: target,
+    url: "https://www.amtrak.com/home.html",
     render_js: "true",
     stealth_proxy: "true",
     country_code: "us",
-    // Single modest wait for the SPA to render fares; keep well under the
-    // gateway timeout. block_resources defaults on (skips images) → faster.
-    wait: "14000",
-    timeout: "120000",
+    json_response: "true",
+    js_scenario: JSON.stringify(jsScenario),
+    timeout: "140000",
   });
 
   const endpoint = `https://app.scrapingbee.com/api/v1/?${params}`;
-  log(`  [bee] fetching ${origin}→${destination} via ScrapingBee stealth pool`);
+  log(`  [bee] driving form ${origin}→${destination} via ScrapingBee stealth pool`);
   const res = await fetch(endpoint);
-  const cost = res.headers.get("spb-cost") || res.headers.get("Spb-cost");
-  log(`  [bee] status=${res.status} cost=${cost}`);
+  log(`  [bee] status=${res.status}`);
   if (!res.ok) {
     log(`  [bee] error body: ${(await res.text()).slice(0, 300)}`);
     return null;
   }
-  const html = await res.text();
-
-  // Diagnostics so we learn the results structure without burning extra credits.
-  const hasResults = /depart|arrive|\d{1,2}:\d{2}\s?(AM|PM)/i.test(html);
+  const data = await res.json();
+  log(`  [bee] cost=${data.cost ?? "?"} evaluate_results=${JSON.stringify(data.evaluate_results || []).slice(0, 400)}`);
+  const html = typeof data.body === "string" ? data.body : "";
   const dollarHits = (html.match(/\$\s?\d{2,4}/g) || []).slice(0, 12);
-  const title = (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || "?";
-  log(`  [bee] title="${title}" hasResults=${hasResults} dollars=${JSON.stringify(dollarHits)}`);
+  log(`  [bee] html dollars=${JSON.stringify(dollarHits)}`);
 
   const fares = extractFaresFromHtml(html);
   return Object.keys(fares).length ? fares : null;
@@ -566,7 +590,7 @@ async function main() {
     // the in-browser strategies are a fallback for local/no-key runs.
     let fares = null;
     if (SCRAPINGBEE_API_KEY) {
-      fares = await scrapeViaScrapingBee(origin, destination, date);
+      fares = await scrapeViaScrapingBee(origin, destination, date, CITY);
     } else {
       fares = await scrapeViaApi(page, origin, destination, date);
       if (!fares) fares = await scrapeViaUi(page, origin, destination, date, CITY);
