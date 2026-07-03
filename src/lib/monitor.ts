@@ -17,6 +17,8 @@ export type CheckOutcome = {
   alertId: string;
   priceCents: number;
   notified: boolean;
+  /** True when no fare data was available (live mode with no fresh scrape). */
+  skipped?: boolean;
 };
 
 /**
@@ -60,6 +62,12 @@ export async function checkAlert(alert: AlertForCheck, now = new Date()): Promis
     seatClass: alert.seatClass,
     checkedAt: now,
   });
+
+  if (!quote.available) {
+    // No real fare data for this query yet — record nothing rather than
+    // basing alerts on invented numbers.
+    return { alertId: alert.id, priceCents: 0, notified: false, skipped: true };
+  }
 
   const priceCents = quote.priceCents;
   const previousPriceCents = alert.currentPriceCents;
@@ -144,7 +152,8 @@ export async function runPriceCheck(now = new Date()) {
   }
 
   return {
-    checked: outcomes.length,
+    checked: outcomes.filter((o) => !o.skipped).length,
+    skipped: outcomes.filter((o) => o.skipped).length,
     notified: outcomes.filter((o) => o.notified).length,
     expired: expired.count,
   };

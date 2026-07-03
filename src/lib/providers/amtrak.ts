@@ -41,11 +41,44 @@ function unit(seed: string): number {
   return hash(seed) / 0xffffffff;
 }
 
+/**
+ * Live mode (PRICE_DATA_MODE=live): serve real fares scraped from
+ * amtrak.com by the GitHub Actions scraper (see scripts/scrape-amtrak.mjs),
+ * which upserts into the ScrapedFare table via /api/scrape/ingest.
+ * Returns available:false when no sufficiently fresh scrape exists —
+ * callers must not treat simulated numbers as real in live mode.
+ */
+async function getScrapedFare(q: FareQuery): Promise<FareQuote | null> {
+  const { db } = await import("@/lib/db");
+  const ttlHours = Number(process.env.SCRAPE_TTL_HOURS ?? 36);
+  const fare = await db.scrapedFare.findUnique({
+    where: {
+      provider_originCode_destinationCode_travelDate_seatClass: {
+        provider: "AMTRAK",
+        originCode: q.originCode,
+        destinationCode: q.destinationCode,
+        travelDate: new Date(q.travelDate + "T00:00:00Z"),
+        seatClass: q.seatClass,
+      },
+    },
+  });
+  if (!fare) return null;
+  if (Date.now() - fare.scrapedAt.getTime() > ttlHours * 60 * 60 * 1000) return null;
+  return { priceCents: fare.priceCents, currency: "USD", available: true, source: "live" };
+}
+
 export const amtrakProvider: PriceProvider = {
   id: "AMTRAK",
   displayName: "Amtrak",
 
   async getFare(q: FareQuery): Promise<FareQuote> {
+    if (process.env.PRICE_DATA_MODE === "live") {
+      const live = await getScrapedFare(q);
+      if (live) return live;
+      // No fresh real data — report unavailable rather than inventing a price.
+      return { priceCents: 0, currency: "USD", available: false, source: "live" };
+    }
+
     const routeKey = `${q.originCode}->${q.destinationCode}`;
 
     // Stable base fare for the route: $29–$189 coach.
@@ -71,6 +104,6 @@ export const amtrakProvider: PriceProvider = {
     // Round to something fare-like: whole dollars.
     const priceCents = Math.max(500, Math.round(price / 100) * 100);
 
-    return { priceCents, currency: "USD", available: true };
+    return { priceCents, currency: "USD", available: true, source: "simulated" };
   },
 };

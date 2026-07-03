@@ -18,6 +18,8 @@ export type FareQuote = {
   currency: "USD";
   /** True when the provider found availability for the query. */
   available: boolean;
+  /** Where the number came from: real scraped data or the simulator. */
+  source: "live" | "simulated";
 };
 
 /**

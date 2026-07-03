@@ -59,7 +59,10 @@ export async function createAlert(_prev: ActionState, formData: FormData): Promi
     checkedAt: now,
   });
 
-  const targetAlreadyMet = quote.priceCents <= data.targetPriceCents;
+  // In live mode there may be no scraped fare yet for this exact query —
+  // the alert starts without a price and the next scrape fills it in.
+  const hasPrice = quote.available;
+  const targetAlreadyMet = hasPrice && quote.priceCents <= data.targetPriceCents;
 
   const alert = await db.alert.create({
     data: {
@@ -70,13 +73,15 @@ export async function createAlert(_prev: ActionState, formData: FormData): Promi
       seatClass: data.seatClass,
       targetPriceCents: data.targetPriceCents,
       notifyOnAnyDrop: data.notifyOnAnyDrop,
-      currentPriceCents: quote.priceCents,
-      lowestPriceCents: quote.priceCents,
-      lastCheckedAt: now,
+      currentPriceCents: hasPrice ? quote.priceCents : null,
+      lowestPriceCents: hasPrice ? quote.priceCents : null,
+      lastCheckedAt: hasPrice ? now : null,
       status: targetAlreadyMet ? "TRIGGERED" : "ACTIVE",
       // Dedup baseline for the immediate notification below.
       lastNotifiedPriceCents: targetAlreadyMet ? quote.priceCents : null,
-      priceHistory: { create: { priceCents: quote.priceCents, recordedAt: now } },
+      ...(hasPrice
+        ? { priceHistory: { create: { priceCents: quote.priceCents, recordedAt: now } } }
+        : {}),
     },
   });
 

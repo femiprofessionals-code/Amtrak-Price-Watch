@@ -39,5 +39,8 @@ export async function GET(request: Request) {
     checkedAt: new Date(),
   });
 
-  return NextResponse.json({ priceCents: quote.priceCents });
+  return NextResponse.json({
+    priceCents: quote.available ? quote.priceCents : null,
+    source: quote.source,
+  });
 }

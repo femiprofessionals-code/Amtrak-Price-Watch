@@ -1,0 +1,46 @@
+name: Scrape Amtrak fares
+
+# Scrapes real fares for every query active alerts need, pushes them to the
+# app, then runs the price check so alerts evaluate against fresh data.
+# Requires repo secret CRON_SECRET (same value as in Vercel).
+on:
+  schedule:
+    - cron: "7,37 * * * *" # every 30 minutes, offset from the price-check workflow
+  workflow_dispatch:
+    inputs:
+      debug_query:
+        description: "Optional debug query: ORIGIN,DEST,YYYY-MM-DD (skips app endpoints)"
+        required: false
+        default: ""
+
+jobs:
+  scrape:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Install Playwright + Chromium
+        run: |
+          npm install playwright@1.56.0
+          npx playwright install --with-deps chromium
+
+      - name: Scrape fares
+        env:
+          APP_URL: https://amtrak-price-watch-ten.vercel.app
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          DEBUG_QUERY: ${{ github.event.inputs.debug_query }}
+        run: node scripts/scrape-amtrak.mjs
+
+      - name: Run price check against fresh data
+        if: ${{ github.event.inputs.debug_query == '' }}
+        env:
+          APP_URL: https://amtrak-price-watch-ten.vercel.app
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+        run: |
+          curl -fsS -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/check-prices" && echo

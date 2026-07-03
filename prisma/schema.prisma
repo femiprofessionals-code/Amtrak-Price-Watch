@@ -125,6 +125,22 @@ model Alert {
   @@index([status, lastCheckedAt])
 }
 
+/// Real fares scraped from the provider's website (one row per query shape,
+/// upserted on every scrape run). The live-mode provider reads these.
+model ScrapedFare {
+  id              String    @id @default(cuid())
+  provider        Provider  @default(AMTRAK)
+  originCode      String
+  destinationCode String
+  travelDate      DateTime  @db.Date
+  seatClass       SeatClass
+  priceCents      Int
+  scrapedAt       DateTime  @default(now())
+
+  @@unique([provider, originCode, destinationCode, travelDate, seatClass])
+  @@index([scrapedAt])
+}
+
 model PriceHistory {
   id         String   @id @default(cuid())
   alertId    String
