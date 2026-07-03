@@ -25,6 +25,8 @@ export async function GET(request: Request) {
     const q = {
       originCode: a.route.origin.code,
       destinationCode: a.route.destination.code,
+      originCity: a.route.origin.city,
+      destinationCity: a.route.destination.city,
       travelDate: a.travelDate.toISOString().slice(0, 10),
       seatClass: a.seatClass,
     };

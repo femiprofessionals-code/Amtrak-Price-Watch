@@ -108,48 +108,123 @@ async function scrapeViaApi(page, origin, destination, date) {
 }
 
 /**
- * Strategy B: drive the real amtrak.com search UI and read fares off the
- * results page. Selectors are refined against the live site via run logs.
+ * Fill an Amtrak station autocomplete field (From/To) and pick the option
+ * matching the station code. Fields live in the Angular booking widget on the
+ * homepage; there are duplicate hidden copies, so we target the visible one and
+ * send real keystrokes so Angular fires its input events.
  */
-async function scrapeViaUi(page, origin, destination, date) {
+async function fillStation(page, ariaLabel, city, code) {
+  const field = page.locator(`input[aria-label="${ariaLabel}"]:visible`).first();
+  await field.click({ timeout: 15000 });
+  await field.fill("");
+  await field.pressSequentially(city, { delay: 90 });
+  // Options render into #station-listbox (ariaControls from recon).
+  const listbox = page.locator("#station-listbox");
+  await listbox.waitFor({ state: "visible", timeout: 12000 }).catch(() => {});
+  await page.waitForTimeout(1500);
+
+  // Prefer the option whose text contains the exact station code.
+  const byCode = page.locator(`#station-listbox [role="option"]`, { hasText: code }).first();
+  if (await byCode.count()) {
+    await byCode.click({ timeout: 5000 });
+    return true;
+  }
+  const anyOpt = page.locator(`#station-listbox [role="option"]`).first();
+  if (await anyOpt.count()) {
+    await anyOpt.click({ timeout: 5000 });
+    return true;
+  }
+  // Fallback: press ArrowDown+Enter to accept the highlighted suggestion.
+  await field.press("ArrowDown");
+  await field.press("Enter");
+  return false;
+}
+
+/**
+ * Strategy B: drive the real amtrak.com booking form and read fares off the
+ * results page. Also dumps results-page structure for refinement.
+ */
+async function scrapeViaUi(page, origin, destination, date, cityHints = {}) {
   const [y, m, d] = date.split("-");
-  const url =
-    `https://www.amtrak.com/tickets/departure.html?wdf_origin=${origin}&wdf_destination=${destination}` +
-    `&departureDate=${m}-${d}-${y}&numAdults=1`;
-  log(`  [ui] goto ${url}`);
-  const resp = await page.goto(url, { waitUntil: "domcontentloaded", timeout: 60000 }).catch((e) => {
-    log(`  [ui] goto failed: ${e.message?.slice(0, 200)}`);
-    return null;
-  });
+  log(`  [ui] loading booking homepage`);
+  const resp = await page
+    .goto("https://www.amtrak.com/home.html", { waitUntil: "domcontentloaded", timeout: 60000 })
+    .catch((e) => {
+      log(`  [ui] goto failed: ${e.message?.slice(0, 160)}`);
+      return null;
+    });
   if (!resp) return null;
-  log(`  [ui] landed status=${resp.status()} url=${page.url()}`);
+  await page.waitForTimeout(8000);
 
-  // Give the SPA time to render fare cards.
-  await page.waitForTimeout(15000);
+  // Make sure the BOOK tab is active so the From/To/Date fields are interactable.
+  const bookTab = page.locator('[role="tab"]', { hasText: /^BOOK$/i }).first();
+  if (await bookTab.count()) await bookTab.click().catch(() => {});
+  await page.waitForTimeout(1500);
 
+  const fromCity = cityHints[origin] || origin;
+  const toCity = cityHints[destination] || destination;
+
+  try {
+    log(`  [ui] From ← ${fromCity} (${origin})`);
+    await fillStation(page, "From station", fromCity, origin);
+    log(`  [ui] To ← ${toCity} (${destination})`);
+    await fillStation(page, "To station", toCity, destination);
+
+    log(`  [ui] date ← ${m}/${d}/${y}`);
+    const dateField = page.locator('input[placeholder="MM/DD/YYYY"]:visible').first();
+    await dateField.click({ timeout: 8000 });
+    await dateField.fill(`${m}/${d}/${y}`);
+    await page.keyboard.press("Escape"); // close any datepicker popover
+
+    log(`  [ui] submitting`);
+    const submit = page.locator('button[type="submit"][aria-label="FIND TRIP"]').first();
+    await submit.click({ timeout: 8000 });
+  } catch (e) {
+    log(`  [ui] form interaction failed: ${e.message?.slice(0, 200)}`);
+    return null;
+  }
+
+  // Wait for navigation to the results view.
+  await page.waitForLoadState("domcontentloaded").catch(() => {});
+  await page.waitForTimeout(18000);
+  log(`  [ui] after submit url=${page.url()}`);
+
+  // Diagnostics + extraction from the results page.
   const diag = await page.evaluate(() => {
-    const title = document.title;
-    const bodyText = document.body?.innerText?.slice(0, 1500) ?? "";
-    // Common fare-button patterns on Amtrak search results.
-    const priceish = [...document.querySelectorAll("button, [class*='fare'], [class*='price']")]
+    const bodyText = document.body?.innerText?.slice(0, 1200) ?? "";
+    const money = [...document.querySelectorAll("*")]
+      .filter((el) => el.children.length === 0)
       .map((el) => el.textContent?.trim())
-      .filter((t) => t && /\$\s?\d/.test(t))
-      .slice(0, 40);
-    return { title, bodyText, priceish };
+      .filter((t) => t && /^\$\s?\d{1,4}(\.\d{2})?$/.test(t))
+      .slice(0, 30);
+    // Elements whose text names a class of service, with a nearby price.
+    const classBlocks = [...document.querySelectorAll("[class*='fare'], [class*='class'], [class*='amenity'], button")]
+      .map((el) => (el.textContent || "").replace(/\s+/g, " ").trim())
+      .filter((t) => /coach|business|first|room|sleeper/i.test(t) && /\$\s?\d/.test(t))
+      .slice(0, 30);
+    return { bodyText, money, classBlocks };
   });
-  log(`  [ui] title="${diag.title}"`);
-  log(`  [ui] price-ish elements: ${JSON.stringify(diag.priceish).slice(0, 1200)}`);
-  log(`  [ui] body snippet: ${diag.bodyText.replace(/\s+/g, " ").slice(0, 600)}`);
+  log(`  [ui] result title="${await page.title().catch(() => "?")}"`);
+  log(`  [ui] money cells: ${JSON.stringify(diag.money).slice(0, 600)}`);
+  log(`  [ui] class+price blocks: ${JSON.stringify(diag.classBlocks).slice(0, 900)}`);
+  log(`  [ui] body: ${diag.bodyText.replace(/\s+/g, " ").slice(0, 500)}`);
 
-  // Parse "$123" amounts near class names out of the collected buttons.
   const fares = {};
-  for (const text of diag.priceish) {
+  for (const text of diag.classBlocks) {
     const cls = classify(text);
-    const money = text.match(/\$\s?(\d+(?:\.\d{2})?)/);
-    if (cls && money) {
-      const cents = Math.round(parseFloat(money[1]) * 100);
+    const mm = text.match(/\$\s?(\d+(?:\.\d{2})?)/);
+    if (cls && mm) {
+      const cents = Math.round(parseFloat(mm[1]) * 100);
       if (!(cls in fares) || cents < fares[cls]) fares[cls] = cents;
     }
+  }
+  // If we couldn't tie a price to a class but there ARE prices, expose the
+  // lowest as COACH (Amtrak's cheapest fare on the results row is coach).
+  if (Object.keys(fares).length === 0 && diag.money.length) {
+    const cents = diag.money
+      .map((t) => Math.round(parseFloat(t.replace(/[^0-9.]/g, "")) * 100))
+      .filter((n) => n > 0);
+    if (cents.length) fares.COACH = Math.min(...cents);
   }
   return Object.keys(fares).length > 0 ? fares : null;
 }
@@ -259,12 +334,21 @@ async function main() {
     return;
   }
 
+  // Station code → city for the autocomplete typeahead (debug mode + fallback).
+  const CITY = {
+    NYP: "New York", WAS: "Washington", PHL: "Philadelphia", BOS: "Boston",
+    BAL: "Baltimore", NWK: "Newark", PVD: "Providence", NHV: "New Haven",
+    WIL: "Wilmington", ALB: "Albany", CHI: "Chicago", PHL30: "Philadelphia",
+  };
+
   let queries;
   if (DEBUG_QUERY) {
     const [o, dst, date] = DEBUG_QUERY.split(",");
     queries = ["COACH", "BUSINESS"].map((seatClass) => ({
       originCode: o,
       destinationCode: dst,
+      originCity: CITY[o] || o,
+      destinationCity: CITY[dst] || dst,
       travelDate: date,
       seatClass,
     }));
@@ -308,6 +392,8 @@ async function main() {
     const key = `${q.originCode}|${q.destinationCode}|${q.travelDate}`;
     if (!groups.has(key)) groups.set(key, []);
     groups.get(key).push(q);
+    CITY[q.originCode] = q.originCity || CITY[q.originCode] || q.originCode;
+    CITY[q.destinationCode] = q.destinationCity || CITY[q.destinationCode] || q.destinationCode;
   }
 
   const collected = [];
@@ -316,7 +402,7 @@ async function main() {
     log(`scraping ${origin} → ${destination} on ${date}`);
 
     let fares = await scrapeViaApi(page, origin, destination, date);
-    if (!fares) fares = await scrapeViaUi(page, origin, destination, date);
+    if (!fares) fares = await scrapeViaUi(page, origin, destination, date, CITY);
 
     if (!fares) {
       log(`  no fares extracted for ${key}`);
