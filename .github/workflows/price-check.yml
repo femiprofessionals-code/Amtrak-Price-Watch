@@ -25,7 +25,16 @@ jobs:
             echo "::warning::CRON_SECRET repository secret is not set — skipping."
             exit 0
           fi
-          response=$(curl -fsS --max-time 240 \
+          status=$(curl -sS -o response.json -w "%{http_code}" --max-time 240 \
             -H "Authorization: Bearer $CRON_SECRET" \
             "$APP_URL/api/cron/check-prices")
-          echo "Result: $response"
+          echo "HTTP status: $status"
+          echo "Response: $(cat response.json)"
+          if [ "$status" != "200" ]; then
+            case "$status" in
+              401) echo "::error::Unauthorized — the CRON_SECRET here doesn't match the one the deployed app is running with. Update both and REDEPLOY on Vercel (env changes need a new deployment)." ;;
+              500) echo "::error::Server error — check the response above and Vercel Logs. If it says CRON_SECRET is not configured, set it in Vercel and redeploy." ;;
+              *)   echo "::error::Unexpected status $status — see response above." ;;
+            esac
+            exit 1
+          fi
