@@ -245,19 +245,22 @@ async function wanderuReconDated(origin, destination, date) {
   }
   log(`  [wrecon] top-level keys: ${JSON.stringify(Object.keys(data))}`);
 
-  // 1) XHR calls captured during render — hunt for the search/fare API.
+  // 1) XHR calls captured during render — dump ALL to find the search/fare API.
   const xhr = data.xhr || data.xhr_responses || [];
   log(`  [wrecon] xhr count: ${Array.isArray(xhr) ? xhr.length : "n/a"}`);
   if (Array.isArray(xhr)) {
-    const interesting = xhr
-      .map((x) => `${x.method || "?"} ${(x.url || "").slice(0, 160)}`)
-      .filter((u) => /search|fare|price|trip|schedule|result|api|graphql|content\.wanderu|rome2|book/i.test(u));
-    for (const u of interesting.slice(0, 25)) log(`  [wrecon] xhr: ${u}`);
-    if (interesting.length === 0) {
-      // Nothing matched — dump the first handful of URLs so we can eyeball them.
-      for (const x of xhr.slice(0, 20)) log(`  [wrecon] xhr(all): ${(x.method || "?")} ${(x.url || "").slice(0, 160)}`);
-    }
+    for (const x of xhr.slice(0, 60)) log(`  [wrecon] xhr: ${(x.method || "?")} ${(x.url || "").slice(0, 180)}`);
   }
+
+  // 1b) Any api.wanderu.com endpoints embedded in the HTML/preloaded state —
+  // the SSR search request that produced the trips reveals the date param.
+  const html0 = data.body || raw;
+  const apiUrls = [...new Set([...html0.matchAll(/https?:\\?\/\\?\/api\.wanderu\.com\/[^"'\\ )]+/g)].map((m) => m[0].replace(/\\\//g, "/")))];
+  log(`  [wrecon] api.wanderu.com URLs in HTML (${apiUrls.length}):`);
+  for (const u of apiUrls.slice(0, 30)) log(`  [wrecon] apiurl: ${u.slice(0, 200)}`);
+  // Also any URL path segment mentioning trips/search/results.
+  const searchish = [...new Set([...html0.matchAll(/["'](\\?\/[a-z0-9\-\/]*(?:trips?|search|results?|schedule)[a-z0-9\-\/]*)["']/gi)].map((m) => m[1].replace(/\\\//g, "/")))];
+  log(`  [wrecon] search-ish paths in HTML (${searchish.length}): ${JSON.stringify(searchish.slice(0, 20))}`);
 
   // 2) Map embedded trips to their dates.
   const html = data.body || raw;
