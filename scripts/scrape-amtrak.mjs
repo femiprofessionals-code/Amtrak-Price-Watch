@@ -104,25 +104,30 @@ async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
   // native value setter + input event (Angular ngModel reacts to that), then
   // dispatch a full mouse sequence on the matching option. Each step returns a
   // diagnostic string surfaced in evaluate_results (json_response=true).
-  // Real-size elements under premium proxy → use ScrapingBee's real fill()
-  // (properly links to Angular's form control) then a trusted click on the
-  // option by XPath, so the station commits (not just the visible text).
-  const optXPath = (code) => `//*[@role="option"][contains(.,"(${code})")]`;
+  // Commit a mat-autocomplete option via keyboard (ArrowDown+Enter). Angular
+  // Material selects the active option on Enter and does NOT check event
+  // isTrusted, so synthetic key events dispatched from evaluate() work — unlike
+  // clicking, which never committed the FormControl. Returns the resulting
+  // input value (full station name if it committed).
+  const kbdSelect = (label) =>
+    `(function(){var i=document.querySelector('input[aria-label="${label}"]');if(!i)return 'noinput';i.focus();` +
+    `function k(key,code){i.dispatchEvent(new KeyboardEvent('keydown',{key:key,code:key,keyCode:code,which:code,bubbles:true,cancelable:true}));` +
+    `i.dispatchEvent(new KeyboardEvent('keyup',{key:key,code:key,keyCode:code,which:code,bubbles:true,cancelable:true}));}` +
+    `k('ArrowDown',40);k('Enter',13);return 'kbd:${label}='+i.value;})()`;
 
   const jsScenario = {
     instructions: [
       { wait: 8000 },
       { fill: ['input[aria-label="From station"]', fromCity] },
       { wait: 3500 },
-      { wait_for_and_click: optXPath(origin) },
+      { evaluate: kbdSelect("From station") },
       { wait: 1500 },
       { fill: ['input[aria-label="To station"]', toCity] },
       { wait: 3500 },
-      { wait_for_and_click: optXPath(destination) },
+      { evaluate: kbdSelect("To station") },
       { wait: 1500 },
       { fill: ['input[placeholder="MM/DD/YYYY"]', `${mo}/${d}/${y}`] },
       { wait: 1000 },
-      // Diagnostic BEFORE submit: what actually committed?
       { evaluate: `(function(){var g=function(l){var i=document.querySelector('input[aria-label="'+l+'"]');return i?i.value:'?'};var codes=[].slice.call(document.querySelectorAll('input[name=stationSearchCode]')).map(function(i){return i.value}).filter(Boolean);var errs=(document.body.innerText.match(/enter a valid station/gi)||[]).length;return 'from='+g('From station')+'|to='+g('To station')+'|codes='+JSON.stringify(codes)+'|validErrs='+errs;})()` },
       { wait_for_and_click: `//button[@type="submit"][@aria-label="FIND TRIP"]` },
       { wait: 16000 },
