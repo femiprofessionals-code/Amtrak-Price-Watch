@@ -194,12 +194,15 @@ async function scrapeViaUi(page, origin, destination, date, cityHints = {}) {
   try {
     log(`  [ui] From ← ${fromCity} (${origin})`);
     await fillStation(page, "From station", fromCity, origin);
-    await page.keyboard.press("Escape"); // close From overlay before To
-    await page.waitForTimeout(600);
+    await page.waitForTimeout(700);
     log(`  [ui] To ← ${toCity} (${destination})`);
     await fillStation(page, "To station", toCity, destination);
-    await page.keyboard.press("Escape");
-    await page.waitForTimeout(400);
+    await page.waitForTimeout(700);
+    // Log the post-fill form state to confirm both stations committed.
+    const formState = await page.evaluate(() =>
+      (document.body.innerText.match(/From[\s\S]{0,80}?To[\s\S]{0,80}?Depart/) || [""])[0].replace(/\s+/g, " ").slice(0, 160),
+    );
+    log(`  [ui] form state: ${JSON.stringify(formState)}`);
 
     log(`  [ui] date ← ${m}/${d}/${y}`);
     const dateField = page.locator('input[placeholder="MM/DD/YYYY"]').first();
