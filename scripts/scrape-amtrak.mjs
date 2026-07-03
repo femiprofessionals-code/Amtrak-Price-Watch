@@ -258,9 +258,14 @@ async function wanderuReconDated(origin, destination, date) {
   const apiUrls = [...new Set([...html0.matchAll(/https?:\\?\/\\?\/api\.wanderu\.com\/[^"'\\ )]+/g)].map((m) => m[0].replace(/\\\//g, "/")))];
   log(`  [wrecon] api.wanderu.com URLs in HTML (${apiUrls.length}):`);
   for (const u of apiUrls.slice(0, 30)) log(`  [wrecon] apiurl: ${u.slice(0, 200)}`);
-  // Also any URL path segment mentioning trips/search/results.
-  const searchish = [...new Set([...html0.matchAll(/["'](\\?\/[a-z0-9\-\/]*(?:trips?|search|results?|schedule)[a-z0-9\-\/]*)["']/gi)].map((m) => m[1].replace(/\\\//g, "/")))];
-  log(`  [wrecon] search-ish paths in HTML (${searchish.length}): ${JSON.stringify(searchish.slice(0, 20))}`);
+  // Also any absolute URL mentioning trips/search/results/schedule (linear scan,
+  // no nested quantifiers → no catastrophic backtracking on the ~1.4MB body).
+  const searchish = [...new Set(
+    [...html0.matchAll(/https?:\\?\/\\?\/[^"'\\ )]+/g)]
+      .map((m) => m[0].replace(/\\\//g, "/"))
+      .filter((u) => /(trips?|search|results?|schedule)/i.test(u))
+  )];
+  log(`  [wrecon] search-ish URLs in HTML (${searchish.length}): ${JSON.stringify(searchish.slice(0, 20))}`);
 
   // 2) Map embedded trips to their dates.
   const html = data.body || raw;
