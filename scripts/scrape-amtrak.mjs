@@ -142,27 +142,12 @@ async function fillStation(page, ariaLabel, city, code) {
     return false;
   }
 
-  // Select the matching option scoped to THIS field's own listbox. Amtrak
-  // renders duplicate id="station-listbox" nodes (one per field, invalid HTML),
-  // so resolve the listbox via the input's aria-controls / nearest open panel
-  // rather than a global #station-listbox lookup, then raw-DOM-click the option.
-  const picked = await field.evaluate((input, code) => {
-    // Find the autocomplete panel associated with this specific input.
-    const root = input.closest("am-autocomplete-new, am-form-field-new") || document;
-    let panel =
-      root.querySelector('[role="listbox"]') ||
-      // Fall back to the last visible listbox in the DOM (the active one).
-      [...document.querySelectorAll('[role="listbox"], #station-listbox')].reverse().find((el) => {
-        const r = el.getBoundingClientRect();
-        return r.width > 0 && r.height > 0;
-      });
-    if (!panel) return null;
-    const opts = [...panel.querySelectorAll('[role="option"], li')];
+  // Select the option matching the station code via raw DOM click (bypasses
+  // actionability checks on Amtrak's 0-size custom option elements).
+  const picked = await page.evaluate((code) => {
+    const opts = [...document.querySelectorAll('#station-listbox [role="option"], #station-listbox li')];
     const match = opts.find((el) => (el.textContent || "").toUpperCase().includes(code)) || opts[0];
     if (!match) return null;
-    match.scrollIntoView();
-    match.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
-    match.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
     match.click();
     return (match.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
   }, code);
