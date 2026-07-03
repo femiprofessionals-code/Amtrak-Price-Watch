@@ -166,6 +166,93 @@ async function scrapeViaWanderu(origin, destination, date) {
   return lowest; // single real fare (cents) for the route
 }
 
+/** Low-level ScrapingBee fetch of an arbitrary Wanderu URL (real browser render). */
+async function beFetch(url, extra = {}) {
+  const params = new URLSearchParams({
+    api_key: SCRAPINGBEE_API_KEY,
+    url,
+    render_js: "true",
+    premium_proxy: "true",
+    country_code: "us",
+    wait: "9000",
+    timeout: "120000",
+    ...extra,
+  });
+  const res = await fetch(`https://app.scrapingbee.com/api/v1/?${params}`);
+  const cost = res.headers.get("spb-cost");
+  const body = await res.text();
+  return { ok: res.ok, status: res.status, cost, body };
+}
+
+/**
+ * RECON: probe how Wanderu exposes DATE-SPECIFIC fares. Tries a couple of dated
+ * URL shapes and dumps what a real render returns — the embedded __NEXT_DATA__
+ * JSON keys, any "time … $price" departure rows, and the redirected URL — so we
+ * can see where per-departure prices live before writing the real parser.
+ */
+async function wanderuReconDated(origin, destination, date) {
+  const o = WANDERU_SLUG[origin];
+  const d = WANDERU_SLUG[destination];
+  if (!o || !d) {
+    log(`  [wrecon] no slug for ${origin} or ${destination}`);
+    return;
+  }
+  const base = `https://www.wanderu.com/en-us/train/${o}/${d}/`;
+  const candidates = [
+    `${base}?date=${date}`,
+    `${base}${date}/`,
+    `${base}?outbound=${date}`,
+  ];
+  for (const url of candidates) {
+    log(`  [wrecon] --- fetching ${url}`);
+    let r;
+    try {
+      r = await beFetch(url);
+    } catch (e) {
+      log(`  [wrecon] fetch threw: ${String(e).slice(0, 160)}`);
+      continue;
+    }
+    log(`  [wrecon] status=${r.status} cost=${r.cost} len=${r.body.length}`);
+    if (!r.ok) {
+      log(`  [wrecon] error body: ${r.body.slice(0, 200)}`);
+      continue;
+    }
+    const html = r.body;
+    const title = (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || "?";
+    // Canonical/redirect target tells us the URL shape Wanderu actually uses.
+    const canonical = (html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i) || [])[1] || "?";
+    const ogUrl = (html.match(/property=["']og:url["'][^>]+content=["']([^"']+)["']/i) || [])[1] || "?";
+    log(`  [wrecon] title="${title}"`);
+    log(`  [wrecon] canonical=${canonical}`);
+    log(`  [wrecon] og:url=${ogUrl}`);
+
+    // Does the page contain the requested date anywhere (confirms date took)?
+    log(`  [wrecon] contains date "${date}": ${html.includes(date)}`);
+    // Departure-time + nearby price rows — the shape we'd parse for per-date fares.
+    const timePrice = [
+      ...html.matchAll(/(\d{1,2}:\d{2}\s?(?:AM|PM|am|pm))[\s\S]{0,120}?\$\s?(\d{1,4})/g),
+    ].slice(0, 8).map((m) => `${m[1]}→$${m[2]}`);
+    log(`  [wrecon] time→price rows: ${JSON.stringify(timePrice)}`);
+
+    // __NEXT_DATA__ / embedded JSON: list the interesting price/trip keys present.
+    const nextData = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
+    if (nextData) {
+      const j = nextData[1];
+      log(`  [wrecon] __NEXT_DATA__ len=${j.length}`);
+      const keys = [...new Set([...j.matchAll(/"([a-zA-Z]*[Pp]rice[a-zA-Z]*|departTime|departureTime|arriveTime|trips|itineraries|legs|operator|carrier|amount|fare[a-zA-Z]*)"\s*:/g)].map((m) => m[1]))];
+      log(`  [wrecon] JSON keys of interest: ${JSON.stringify(keys.slice(0, 40))}`);
+      // Show a slice around the first price occurrence for structure.
+      const pIdx = j.search(/"(price|amount|lowestPrice)"\s*:/i);
+      if (pIdx >= 0) log(`  [wrecon] price context: ${j.slice(Math.max(0, pIdx - 80), pIdx + 200).replace(/\s+/g, " ")}`);
+    } else {
+      log(`  [wrecon] no __NEXT_DATA__; scanning inline JSON for price keys`);
+      const pIdx = html.search(/"(price|lowestPrice|amount)"\s*:/i);
+      if (pIdx >= 0) log(`  [wrecon] inline price context: ${html.slice(Math.max(0, pIdx - 80), pIdx + 200).replace(/\s+/g, " ")}`);
+    }
+    await new Promise((r) => setTimeout(r, 1500));
+  }
+}
+
 async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
   const [y, mo, d] = date.split("-");
   const fromCity = cityHints[origin] || origin;
@@ -614,6 +701,18 @@ async function main() {
     BAL: "Baltimore", NWK: "Newark", PVD: "Providence", NHV: "New Haven",
     WIL: "Wilmington", ALB: "Albany", CHI: "Chicago", PHL30: "Philadelphia",
   };
+
+  // WRECON:ORIGIN,DEST,YYYY-MM-DD — probe Wanderu's dated-page structure only.
+  if (DEBUG_QUERY?.startsWith("WRECON:")) {
+    if (!SCRAPINGBEE_API_KEY) {
+      log("WRECON needs SCRAPINGBEE_API_KEY");
+      return;
+    }
+    const [o, dst, date] = DEBUG_QUERY.slice("WRECON:".length).split(",");
+    log(`wanderu recon: ${o} → ${dst} on ${date}`);
+    await wanderuReconDated(o, dst, date);
+    return;
+  }
 
   let queries;
   if (DEBUG_QUERY) {
