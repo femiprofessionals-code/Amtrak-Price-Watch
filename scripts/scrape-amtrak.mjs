@@ -140,7 +140,9 @@ async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
     api_key: SCRAPINGBEE_API_KEY,
     url: "https://www.amtrak.com/home.html",
     render_js: "true",
-    stealth_proxy: "true",
+    // premium_proxy (residential) supports js_scenario; stealth_proxy does NOT
+    // (it silently ignores the scenario — the reason the form never drove).
+    premium_proxy: "true",
     country_code: "us",
     json_response: "true",
     js_scenario: JSON.stringify(jsScenario),
