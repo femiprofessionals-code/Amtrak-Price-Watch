@@ -71,7 +71,8 @@ npm run dev
 
 `GET /api/cron/check-prices` (requires `Authorization: Bearer $CRON_SECRET`) runs a full pass: expires alerts whose travel date passed, fetches the current fare for every active alert, records history, and notifies (in-app + email) when targets are hit.
 
-- **Vercel:** `vercel.json` schedules it every 6 hours; Vercel Cron sends the auth header automatically once `CRON_SECRET` is set in project env.
+- **GitHub Actions (primary):** `.github/workflows/price-check.yml` calls the endpoint every 30 minutes. One-time setup: add a repository secret named `CRON_SECRET` (GitHub → repo → Settings → Secrets and variables → Actions) matching the value in Vercel. Scheduled workflows run from the repo's default branch.
+- **Vercel Cron (backup):** `vercel.json` schedules a daily run (the Hobby plan allows at most one run per day); the auth header is sent automatically once `CRON_SECRET` is set in project env. Runs only on production deployments.
 - **Anywhere else:** point any scheduler at the endpoint with the same header.
 - Users can also trigger a single-alert check from the UI ("Check price now").
 

@@ -1,0 +1,31 @@
+name: Price monitoring
+
+# Calls the app's monitoring endpoint on a schedule. This supplements
+# Vercel Cron, which on the Hobby plan only runs once per day.
+#
+# Setup (one time): GitHub repo → Settings → Secrets and variables →
+# Actions → New repository secret → name: CRON_SECRET, value: the same
+# secret configured in Vercel.
+on:
+  schedule:
+    - cron: "*/30 * * * *" # every 30 minutes
+  workflow_dispatch: {} # allows manual runs from the Actions tab
+
+jobs:
+  check-prices:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Trigger price monitoring
+        env:
+          CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          APP_URL: https://amtrak-price-watch-ten.vercel.app
+        run: |
+          if [ -z "$CRON_SECRET" ]; then
+            echo "::warning::CRON_SECRET repository secret is not set — skipping."
+            exit 0
+          fi
+          response=$(curl -fsS --max-time 240 \
+            -H "Authorization: Bearer $CRON_SECRET" \
+            "$APP_URL/api/cron/check-prices")
+          echo "Result: $response"
