@@ -279,6 +279,44 @@ async function wanderuReconDated(origin, destination, date) {
   log(`  [wrecon] trips for requested ${date}: ${forDate.length} → prices ${JSON.stringify(forDate.map((t) => t.priceCents).slice(0, 20))}`);
 }
 
+/**
+ * Fetch the Wanderu route page DIRECTLY (no ScrapingBee) with browser-like
+ * headers. Wanderu server-renders real Amtrak trips into the HTML, so if the
+ * runner's IP isn't blocked this gives us real fares for ZERO proxy credits.
+ * Returns { ok, status, blocked, fromCents, trips, dates } for recon.
+ */
+async function fetchWanderuDirect(origin, destination) {
+  const o = WANDERU_SLUG[origin];
+  const d = WANDERU_SLUG[destination];
+  if (!o || !d) return { ok: false, reason: "no-slug" };
+  const target = `https://www.wanderu.com/en-us/train/${o}/${d}/`;
+  const res = await fetch(target, {
+    headers: {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+      Accept: "text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8",
+      "Accept-Language": "en-US,en;q=0.9",
+    },
+    redirect: "follow",
+  });
+  const html = await res.text();
+  const blocked = /just a moment|cf-chl|cloudflare|access denied|attention required/i.test(html);
+  const fromMatch = html.match(/from\s*\$\s?(\d{1,4})\b/i) || html.match(/\$\s?(\d{1,4})\+/);
+  const trips = parseWanderuTrips(html);
+  const dates = {};
+  for (const t of trips) dates[t.iso] = (dates[t.iso] || 0) + 1;
+  return {
+    ok: res.ok,
+    status: res.status,
+    len: html.length,
+    blocked,
+    fromCents: fromMatch ? Math.round(parseFloat(fromMatch[1]) * 100) : null,
+    trips: trips.length,
+    dates,
+    titleSnippet: (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || "?",
+  };
+}
+
 async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
   const [y, mo, d] = date.split("-");
   const fromCity = cityHints[origin] || origin;
@@ -727,6 +765,20 @@ async function main() {
     BAL: "Baltimore", NWK: "Newark", PVD: "Providence", NHV: "New Haven",
     WIL: "Wilmington", ALB: "Albany", CHI: "Chicago", PHL30: "Philadelphia",
   };
+
+  // WDIRECT:ORIGIN,DEST — test a direct (no-ScrapingBee, zero-credit) fetch of
+  // Wanderu to see if the runner IP can read the server-rendered fares itself.
+  if (DEBUG_QUERY?.startsWith("WDIRECT:")) {
+    const [o, dst] = DEBUG_QUERY.slice("WDIRECT:".length).split(",");
+    log(`wanderu DIRECT fetch test: ${o} → ${dst}`);
+    try {
+      const r = await fetchWanderuDirect(o, dst);
+      log(`  [wdirect] ${JSON.stringify(r)}`);
+    } catch (e) {
+      log(`  [wdirect] threw: ${String(e).slice(0, 200)}`);
+    }
+    return;
+  }
 
   // WRECON:ORIGIN,DEST,YYYY-MM-DD — probe Wanderu's dated-page structure only.
   if (DEBUG_QUERY?.startsWith("WRECON:")) {
