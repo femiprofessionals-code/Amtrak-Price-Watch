@@ -7,7 +7,8 @@ import { requireUser } from "@/lib/auth";
 import { alertSchema } from "@/lib/validation";
 import { getProvider } from "@/lib/providers";
 import { sendEmail } from "@/lib/email/send";
-import { alertCreatedTemplate } from "@/lib/email/templates";
+import { alertCreatedTemplate, priceDropTemplate } from "@/lib/email/templates";
+import { formatCents } from "@/lib/format";
 import { fieldErrorsFromZod, type ActionState } from "./types";
 
 function parseAlertForm(formData: FormData) {
@@ -58,6 +59,8 @@ export async function createAlert(_prev: ActionState, formData: FormData): Promi
     checkedAt: now,
   });
 
+  const targetAlreadyMet = quote.priceCents <= data.targetPriceCents;
+
   const alert = await db.alert.create({
     data: {
       userId: user.id,
@@ -70,10 +73,38 @@ export async function createAlert(_prev: ActionState, formData: FormData): Promi
       currentPriceCents: quote.priceCents,
       lowestPriceCents: quote.priceCents,
       lastCheckedAt: now,
-      status: quote.priceCents <= data.targetPriceCents ? "TRIGGERED" : "ACTIVE",
+      status: targetAlreadyMet ? "TRIGGERED" : "ACTIVE",
+      // Dedup baseline for the immediate notification below.
+      lastNotifiedPriceCents: targetAlreadyMet ? quote.priceCents : null,
       priceHistory: { create: { priceCents: quote.priceCents, recordedAt: now } },
     },
   });
+
+  // The fare already meets the target — tell the user right now instead of
+  // making them wait for the next scheduled check.
+  if (targetAlreadyMet) {
+    await db.notification.create({
+      data: {
+        userId: user.id,
+        alertId: alert.id,
+        type: "PRICE_DROP",
+        title: `Target hit: ${origin.city} → ${destination.city}`,
+        body: `The fare is already ${formatCents(quote.priceCents)} — at or below your target of ${formatCents(data.targetPriceCents)}.`,
+      },
+    });
+    if (user.emailOnPriceDrop) {
+      const { subject, html } = priceDropTemplate(user.name, {
+        origin: origin.city,
+        destination: destination.city,
+        travelDate: alert.travelDate,
+        targetPriceCents: alert.targetPriceCents,
+        currentPriceCents: quote.priceCents,
+        previousPriceCents: null,
+        alertId: alert.id,
+      });
+      await sendEmail({ to: user.email, subject, html });
+    }
+  }
 
   await db.notification.create({
     data: {
