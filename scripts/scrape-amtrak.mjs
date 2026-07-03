@@ -99,32 +99,40 @@ async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
   const fromCity = cityHints[origin] || origin;
   const toCity = cityHints[destination] || destination;
 
-  // Drive Amtrak's booking form inside ScrapingBee's residential browser.
-  // fill() fires real input events (populates the autocomplete); we then pick
-  // the option matching the station code and submit. evaluate() steps return
-  // diagnostics via evaluate_results (json_response=true).
+  // Drive Amtrak's booking form entirely through evaluate() — JavaScript works
+  // on the 0-size custom inputs that fill()/click() can't touch. Type via the
+  // native value setter + input event (Angular ngModel reacts to that), then
+  // dispatch a full mouse sequence on the matching option. Each step returns a
+  // diagnostic string surfaced in evaluate_results (json_response=true).
+  const type = (label, val) =>
+    `(function(){var i=document.querySelector('input[aria-label="${label}"]');if(!i)return 'noinput:${label}';` +
+    `i.focus();var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;` +
+    `s.call(i,'${val}');i.dispatchEvent(new Event('input',{bubbles:true}));` +
+    `i.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'a'}));return 'typed:${label}='+i.value;})()`;
   const pick = (code) =>
-    `(function(){var o=[].slice.call(document.querySelectorAll('#station-listbox [role=option], #station-listbox li'));` +
-    `var m=o.filter(function(e){return (e.textContent||'').toUpperCase().indexOf('${code}')>-1})[0]||o[0];` +
-    `if(!m)return 'noopts:'+o.length;var r=m.getBoundingClientRect();m.click();` +
-    `return 'picked:'+(m.textContent||'').replace(/\\s+/g,' ').trim().slice(0,40)+'|wh='+Math.round(r.width)+'x'+Math.round(r.height);})()`;
+    `(function(){var o=[].slice.call(document.querySelectorAll('#station-listbox [role=option],#station-listbox li'));` +
+    `if(!o.length)return 'noopts';var m=o.filter(function(e){return (e.textContent||'').toUpperCase().indexOf('${code}')>-1})[0]||o[0];` +
+    `var r=m.getBoundingClientRect();['pointerdown','mousedown','mouseup','click'].forEach(function(ev){` +
+    `m.dispatchEvent(new MouseEvent(ev,{bubbles:true,cancelable:true}))});` +
+    `return 'pick:'+(m.textContent||'').replace(/\\s+/g,' ').trim().slice(0,30)+'|n='+o.length+'|wh='+Math.round(r.width)+'x'+Math.round(r.height);})()`;
 
   const jsScenario = {
     instructions: [
       { wait: 8000 },
-      { fill: ['input[aria-label="From station"]', fromCity] },
+      { evaluate: type("From station", fromCity) },
       { wait: 3500 },
       { evaluate: pick(origin) },
-      { wait: 1200 },
-      { fill: ['input[aria-label="To station"]', toCity] },
+      { wait: 1500 },
+      { evaluate: type("To station", toCity) },
       { wait: 3500 },
       { evaluate: pick(destination) },
-      { wait: 1200 },
-      { fill: ['input[placeholder="MM/DD/YYYY"]', `${mo}/${d}/${y}`] },
-      { wait: 800 },
-      { evaluate: `(function(){var b=document.querySelector('button[type=submit][aria-label="FIND TRIP"]');if(b){b.click();return 'submitted'}return 'nosubmit'})()` },
-      { wait: 12000 },
-      { evaluate: `(function(){return (document.body.innerText.match(/\\$\\s?\\d{2,4}/g)||[]).slice(0,10).join(',')||'noprices'})()` },
+      { wait: 1500 },
+      { evaluate: type("Departure date. Format: mm slash dd slash yyyy", `${mo}/${d}/${y}`) },
+      { evaluate: `(function(){var i=document.querySelector('input[placeholder="MM/DD/YYYY"]');if(!i)return 'nodate';i.focus();var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;s.call(i,'${mo}/${d}/${y}');i.dispatchEvent(new Event('input',{bubbles:true}));return 'date='+i.value;})()` },
+      { wait: 1000 },
+      { evaluate: `(function(){var b=document.querySelector('button[type=submit][aria-label="FIND TRIP"]');if(!b)return 'nosubmit';b.click();return 'submitted';})()` },
+      { wait: 13000 },
+      { evaluate: `(function(){var p=(document.body.innerText.match(/\\$\\s?\\d{2,4}/g)||[]).slice(0,12);return 'url='+location.pathname+'|prices='+(p.join(',')||'none');})()` },
     ],
   };
 
