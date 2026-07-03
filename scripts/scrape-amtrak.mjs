@@ -160,15 +160,10 @@ async function scrapeViaWanderu(origin, destination, date) {
   const uniq = [...new Set(allCents)].sort((a, b) => a - b);
   log(`  [wanderu] title="${title}" from=$${fromMatch ? fromMatch[1] : "?"} fares=${JSON.stringify(uniq.slice(0, 15))} acela=${acela}`);
 
+  // Wanderu's advertised "from $NN" is the route's real lowest Amtrak fare.
   const lowest = fromMatch ? Math.round(parseFloat(fromMatch[1]) * 100) : uniq[0];
   if (!lowest) return null;
-
-  const fares = { COACH: lowest };
-  // Acela (premium) fares are the upper cluster; map the max plausible to First.
-  if (acela && uniq.length > 1 && uniq[uniq.length - 1] > lowest) {
-    fares.FIRST = uniq[uniq.length - 1];
-  }
-  return fares;
+  return lowest; // single real fare (cents) for the route
 }
 
 async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
@@ -683,13 +678,13 @@ async function main() {
     const [origin, destination, date] = key.split("|");
     log(`scraping ${origin} → ${destination} on ${date}`);
 
-    // ScrapingBee (residential + stealth) is the primary path when configured;
-    // the in-browser strategies are a fallback for local/no-key runs.
     let fares = null;
     if (SCRAPINGBEE_API_KEY) {
       // Wanderu aggregates real Amtrak fares and is scrapable; amtrak.com's
-      // form is not automatable, so Wanderu is the primary real-data source.
-      fares = await scrapeViaWanderu(origin, destination, date);
+      // form is not automatable. scrapeViaWanderu returns a single real
+      // route fare (cents) that applies to every requested seat class.
+      const price = await scrapeViaWanderu(origin, destination, date);
+      if (price != null) fares = Object.fromEntries(group.map((q) => [q.seatClass, price]));
     } else {
       fares = await scrapeViaApi(page, origin, destination, date);
       if (!fares) fares = await scrapeViaUi(page, origin, destination, date, CITY);
