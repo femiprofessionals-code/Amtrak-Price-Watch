@@ -114,29 +114,53 @@ async function scrapeViaApi(page, origin, destination, date) {
  * send real keystrokes so Angular fires its input events.
  */
 async function fillStation(page, ariaLabel, city, code) {
-  const field = page.locator(`input[aria-label="${ariaLabel}"]:visible`).first();
-  await field.click({ timeout: 15000 });
-  await field.fill("");
-  await field.pressSequentially(city, { delay: 90 });
-  // Options render into #station-listbox (ariaControls from recon).
-  const listbox = page.locator("#station-listbox");
-  await listbox.waitFor({ state: "visible", timeout: 12000 }).catch(() => {});
-  await page.waitForTimeout(1500);
+  // The station <input> is a zero-size element inside a custom am-autocomplete
+  // component, so :visible never matches. Wait for it in the DOM, then drive it
+  // with force-click + real keyboard events.
+  const field = page.locator(`input[aria-label="${ariaLabel}"]`).first();
+  await field.waitFor({ state: "attached", timeout: 25000 });
 
-  // Prefer the option whose text contains the exact station code.
+  // Diagnostics: does it exist, what's its size/box?
+  const box = await field.evaluate((el) => {
+    const r = el.getBoundingClientRect();
+    return { w: Math.round(r.width), h: Math.round(r.height), top: Math.round(r.top), id: el.id };
+  }).catch(() => null);
+  log(`    [field ${ariaLabel}] box=${JSON.stringify(box)}`);
+
+  await field.scrollIntoViewIfNeeded().catch(() => {});
+  // Focus via JS (works on zero-size inputs), then type real keystrokes.
+  await field.evaluate((el) => el.focus()).catch(() => {});
+  await field.click({ force: true, timeout: 8000 }).catch((e) => log(`    force-click note: ${e.message?.slice(0, 80)}`));
+  await page.keyboard.type(city, { delay: 110 });
+  await page.waitForTimeout(2500);
+
+  // Options render into #station-listbox (ariaControls from recon).
+  const optCount = await page.locator('#station-listbox [role="option"], #station-listbox li').count();
+  log(`    [field ${ariaLabel}] listbox options=${optCount}`);
+  if (optCount === 0) {
+    // Dump what dropdown-ish elements exist to learn the real structure.
+    const dd = await page.evaluate(() => {
+      const els = [...document.querySelectorAll('[role="option"], [id*="listbox" i] *, [class*="autocomplete" i] li, [class*="suggestion" i]')]
+        .map((el) => (el.textContent || "").replace(/\s+/g, " ").trim())
+        .filter((t) => t && t.length < 60)
+        .slice(0, 10);
+      return els;
+    });
+    log(`    [field ${ariaLabel}] dropdown probe: ${JSON.stringify(dd)}`);
+  }
+
   const byCode = page.locator(`#station-listbox [role="option"]`, { hasText: code }).first();
   if (await byCode.count()) {
     await byCode.click({ timeout: 5000 });
     return true;
   }
-  const anyOpt = page.locator(`#station-listbox [role="option"]`).first();
+  const anyOpt = page.locator(`#station-listbox [role="option"], #station-listbox li`).first();
   if (await anyOpt.count()) {
     await anyOpt.click({ timeout: 5000 });
     return true;
   }
-  // Fallback: press ArrowDown+Enter to accept the highlighted suggestion.
-  await field.press("ArrowDown");
-  await field.press("Enter");
+  await page.keyboard.press("ArrowDown");
+  await page.keyboard.press("Enter");
   return false;
 }
 
@@ -171,14 +195,17 @@ async function scrapeViaUi(page, origin, destination, date, cityHints = {}) {
     await fillStation(page, "To station", toCity, destination);
 
     log(`  [ui] date ← ${m}/${d}/${y}`);
-    const dateField = page.locator('input[placeholder="MM/DD/YYYY"]:visible').first();
-    await dateField.click({ timeout: 8000 });
-    await dateField.fill(`${m}/${d}/${y}`);
+    const dateField = page.locator('input[placeholder="MM/DD/YYYY"]').first();
+    await dateField.waitFor({ state: "attached", timeout: 8000 }).catch(() => {});
+    await dateField.evaluate((el) => el.focus()).catch(() => {});
+    await dateField.click({ force: true, timeout: 6000 }).catch(() => {});
+    await page.keyboard.type(`${m}/${d}/${y}`, { delay: 60 });
     await page.keyboard.press("Escape"); // close any datepicker popover
+    await page.waitForTimeout(1000);
 
     log(`  [ui] submitting`);
     const submit = page.locator('button[type="submit"][aria-label="FIND TRIP"]').first();
-    await submit.click({ timeout: 8000 });
+    await submit.click({ force: true, timeout: 8000 });
   } catch (e) {
     log(`  [ui] form interaction failed: ${e.message?.slice(0, 200)}`);
     return null;
