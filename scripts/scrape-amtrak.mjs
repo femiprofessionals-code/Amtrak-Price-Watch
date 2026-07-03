@@ -122,6 +122,8 @@ async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
       { wait: 1500 },
       { fill: ['input[placeholder="MM/DD/YYYY"]', `${mo}/${d}/${y}`] },
       { wait: 1000 },
+      // Diagnostic BEFORE submit: what actually committed?
+      { evaluate: `(function(){var g=function(l){var i=document.querySelector('input[aria-label="'+l+'"]');return i?i.value:'?'};var codes=[].slice.call(document.querySelectorAll('input[name=stationSearchCode]')).map(function(i){return i.value}).filter(Boolean);var errs=(document.body.innerText.match(/enter a valid station/gi)||[]).length;return 'from='+g('From station')+'|to='+g('To station')+'|codes='+JSON.stringify(codes)+'|validErrs='+errs;})()` },
       { wait_for_and_click: `//button[@type="submit"][@aria-label="FIND TRIP"]` },
       { wait: 16000 },
       { evaluate: `(function(){var p=(document.body.innerText.match(/\\$\\s?\\d{2,4}/g)||[]).slice(0,12);return 'url='+location.pathname+'|err='+((document.body.innerText.match(/enter a valid station|select a date|required/gi)||[]).join(',')||'none')+'|prices='+(p.join(',')||'none');})()` },
