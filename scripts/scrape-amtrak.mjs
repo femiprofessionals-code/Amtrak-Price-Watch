@@ -133,27 +133,33 @@ async function fillStation(page, ariaLabel, city, code) {
   await page.keyboard.type(city, { delay: 110 });
   await page.waitForTimeout(2800);
 
-  // Options render into #station-listbox (ariaControls from recon).
-  const optCount = await page.locator('#station-listbox [role="option"], #station-listbox li').count();
-  log(`    [field ${ariaLabel}] listbox options=${optCount}`);
-  if (optCount === 0) {
+  // Select via Playwright's NATIVE click — it dispatches trusted pointer events
+  // (which Angular Material requires to commit) and only matches the visible
+  // option, sidestepping Amtrak's duplicate #station-listbox ids.
+  const byCode = page.getByRole("option", { name: new RegExp(`\\(${code}\\)`) }).first();
+  const anyVisible = page.locator('[role="option"]:visible').first();
+  let target = null;
+  if (await byCode.count()) target = byCode;
+  else if (await anyVisible.count()) target = anyVisible;
+
+  if (!target) {
+    log(`    [field ${ariaLabel}] no visible option — ArrowDown+Enter fallback`);
     await page.keyboard.press("ArrowDown");
     await page.keyboard.press("Enter");
     return false;
   }
 
-  // Select the option matching the station code via raw DOM click (bypasses
-  // actionability checks on Amtrak's 0-size custom option elements).
-  const picked = await page.evaluate((code) => {
-    const opts = [...document.querySelectorAll('#station-listbox [role="option"], #station-listbox li')];
-    const match = opts.find((el) => (el.textContent || "").toUpperCase().includes(code)) || opts[0];
-    if (!match) return null;
-    match.click();
-    return (match.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
-  }, code);
-  log(`    [field ${ariaLabel}] picked: ${JSON.stringify(picked)}`);
+  const text = await target.textContent().catch(() => "");
+  try {
+    await target.click({ timeout: 8000 });
+    log(`    [field ${ariaLabel}] clicked option: ${JSON.stringify((text || "").replace(/\s+/g, " ").trim().slice(0, 60))}`);
+  } catch (e) {
+    log(`    [field ${ariaLabel}] native click failed: ${e.message?.slice(0, 90)} — ArrowDown+Enter`);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+  }
   await page.waitForTimeout(900);
-  return picked != null;
+  return true;
 }
 
 /**
