@@ -127,41 +127,33 @@ async function fillStation(page, ariaLabel, city, code) {
   }).catch(() => null);
   log(`    [field ${ariaLabel}] box=${JSON.stringify(box)}`);
 
-  await field.scrollIntoViewIfNeeded().catch(() => {});
-  // Focus via JS (works on zero-size inputs), then type real keystrokes.
+  // Focus via JS (works on zero-size inputs), then type real keystrokes —
+  // this is what makes the autocomplete populate.
   await field.evaluate((el) => el.focus()).catch(() => {});
-  await field.click({ force: true, timeout: 8000 }).catch((e) => log(`    force-click note: ${e.message?.slice(0, 80)}`));
   await page.keyboard.type(city, { delay: 110 });
-  await page.waitForTimeout(2500);
+  await page.waitForTimeout(2800);
 
   // Options render into #station-listbox (ariaControls from recon).
   const optCount = await page.locator('#station-listbox [role="option"], #station-listbox li').count();
   log(`    [field ${ariaLabel}] listbox options=${optCount}`);
   if (optCount === 0) {
-    // Dump what dropdown-ish elements exist to learn the real structure.
-    const dd = await page.evaluate(() => {
-      const els = [...document.querySelectorAll('[role="option"], [id*="listbox" i] *, [class*="autocomplete" i] li, [class*="suggestion" i]')]
-        .map((el) => (el.textContent || "").replace(/\s+/g, " ").trim())
-        .filter((t) => t && t.length < 60)
-        .slice(0, 10);
-      return els;
-    });
-    log(`    [field ${ariaLabel}] dropdown probe: ${JSON.stringify(dd)}`);
+    await page.keyboard.press("ArrowDown");
+    await page.keyboard.press("Enter");
+    return false;
   }
 
-  const byCode = page.locator(`#station-listbox [role="option"]`, { hasText: code }).first();
-  if (await byCode.count()) {
-    await byCode.click({ timeout: 5000 });
-    return true;
-  }
-  const anyOpt = page.locator(`#station-listbox [role="option"], #station-listbox li`).first();
-  if (await anyOpt.count()) {
-    await anyOpt.click({ timeout: 5000 });
-    return true;
-  }
-  await page.keyboard.press("ArrowDown");
-  await page.keyboard.press("Enter");
-  return false;
+  // Select the option matching the station code (raw DOM click bypasses the
+  // actionability checks that block 0-size elements). Log what we pick.
+  const picked = await page.evaluate((code) => {
+    const opts = [...document.querySelectorAll('#station-listbox [role="option"], #station-listbox li')];
+    const match = opts.find((el) => (el.textContent || "").toUpperCase().includes(code)) || opts[0];
+    if (!match) return null;
+    match.click();
+    return (match.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
+  }, code);
+  log(`    [field ${ariaLabel}] picked: ${JSON.stringify(picked)}`);
+  await page.waitForTimeout(800);
+  return picked != null;
 }
 
 /**
@@ -198,14 +190,18 @@ async function scrapeViaUi(page, origin, destination, date, cityHints = {}) {
     const dateField = page.locator('input[placeholder="MM/DD/YYYY"]').first();
     await dateField.waitFor({ state: "attached", timeout: 8000 }).catch(() => {});
     await dateField.evaluate((el) => el.focus()).catch(() => {});
-    await dateField.click({ force: true, timeout: 6000 }).catch(() => {});
     await page.keyboard.type(`${m}/${d}/${y}`, { delay: 60 });
     await page.keyboard.press("Escape"); // close any datepicker popover
     await page.waitForTimeout(1000);
 
     log(`  [ui] submitting`);
-    const submit = page.locator('button[type="submit"][aria-label="FIND TRIP"]').first();
-    await submit.click({ force: true, timeout: 8000 });
+    const submitted = await page.evaluate(() => {
+      const btn = document.querySelector('button[type="submit"][aria-label="FIND TRIP"]');
+      if (btn) { btn.click(); return true; }
+      return false;
+    });
+    log(`  [ui] submit clicked=${submitted}`);
+    if (!submitted) return null;
   } catch (e) {
     log(`  [ui] form interaction failed: ${e.message?.slice(0, 200)}`);
     return null;
