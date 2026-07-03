@@ -142,29 +142,33 @@ async function fillStation(page, ariaLabel, city, code) {
     return false;
   }
 
-  // Angular Material autocompletes commit reliably on keyboard selection, not
-  // synthetic clicks. Find the index of the option matching the station code,
-  // arrow down to it, and press Enter.
-  const idx = await page.evaluate((code) => {
-    const opts = [...document.querySelectorAll('#station-listbox [role="option"], #station-listbox li')];
-    const i = opts.findIndex((el) => (el.textContent || "").toUpperCase().includes(code));
-    return i >= 0 ? i : opts.length ? 0 : -1;
+  // Select the matching option scoped to THIS field's own listbox. Amtrak
+  // renders duplicate id="station-listbox" nodes (one per field, invalid HTML),
+  // so resolve the listbox via the input's aria-controls / nearest open panel
+  // rather than a global #station-listbox lookup, then raw-DOM-click the option.
+  const picked = await field.evaluate((input, code) => {
+    // Find the autocomplete panel associated with this specific input.
+    const root = input.closest("am-autocomplete-new, am-form-field-new") || document;
+    let panel =
+      root.querySelector('[role="listbox"]') ||
+      // Fall back to the last visible listbox in the DOM (the active one).
+      [...document.querySelectorAll('[role="listbox"], #station-listbox')].reverse().find((el) => {
+        const r = el.getBoundingClientRect();
+        return r.width > 0 && r.height > 0;
+      });
+    if (!panel) return null;
+    const opts = [...panel.querySelectorAll('[role="option"], li')];
+    const match = opts.find((el) => (el.textContent || "").toUpperCase().includes(code)) || opts[0];
+    if (!match) return null;
+    match.scrollIntoView();
+    match.dispatchEvent(new MouseEvent("mousedown", { bubbles: true }));
+    match.dispatchEvent(new MouseEvent("mouseup", { bubbles: true }));
+    match.click();
+    return (match.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
   }, code);
-  if (idx < 0) {
-    await page.keyboard.press("Enter");
-    return false;
-  }
-  for (let i = 0; i <= idx; i++) {
-    await page.keyboard.press("ArrowDown");
-    await page.waitForTimeout(120);
-  }
-  await page.keyboard.press("Enter");
+  log(`    [field ${ariaLabel}] picked: ${JSON.stringify(picked)}`);
   await page.waitForTimeout(900);
-
-  // Read back the committed value to confirm the selection stuck.
-  const committed = await field.evaluate((el) => el.value).catch(() => "");
-  log(`    [field ${ariaLabel}] committed value=${JSON.stringify(committed)}`);
-  return /\w/.test(committed);
+  return picked != null;
 }
 
 /**
