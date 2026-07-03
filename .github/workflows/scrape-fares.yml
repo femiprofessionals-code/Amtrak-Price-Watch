@@ -33,6 +33,7 @@ jobs:
         env:
           APP_URL: https://amtrak-price-watch-ten.vercel.app
           CRON_SECRET: ${{ secrets.CRON_SECRET }}
+          SCRAPINGBEE_API_KEY: ${{ secrets.SCRAPINGBEE_API_KEY }}
           DEBUG_QUERY: ${{ github.event.inputs.debug_query }}
         run: node scripts/scrape-amtrak.mjs
 
