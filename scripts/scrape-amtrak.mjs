@@ -104,27 +104,28 @@ async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
   // native value setter + input event (Angular ngModel reacts to that), then
   // dispatch a full mouse sequence on the matching option. Each step returns a
   // diagnostic string surfaced in evaluate_results (json_response=true).
-  // Commit a mat-autocomplete option via keyboard (ArrowDown+Enter). Angular
-  // Material selects the active option on Enter and does NOT check event
-  // isTrusted, so synthetic key events dispatched from evaluate() work — unlike
-  // clicking, which never committed the FormControl. Returns the resulting
-  // input value (full station name if it committed).
-  const kbdSelect = (label) =>
-    `(function(){var i=document.querySelector('input[aria-label="${label}"]');if(!i)return 'noinput';i.focus();` +
-    `function k(key,code){i.dispatchEvent(new KeyboardEvent('keydown',{key:key,code:key,keyCode:code,which:code,bubbles:true,cancelable:true}));` +
-    `i.dispatchEvent(new KeyboardEvent('keyup',{key:key,code:key,keyCode:code,which:code,bubbles:true,cancelable:true}));}` +
-    `k('ArrowDown',40);k('Enter',13);return 'kbd:${label}='+i.value;})()`;
+  // Click the VISIBLE option (offsetWidth>0) matching the code — there are
+  // duplicate 0-size a11y-mirror options, and earlier selectors hit those.
+  // Report the hidden stationSearchCode fields immediately after, to confirm
+  // the selection actually committed to Angular's model.
+  const clickVisible = (code) =>
+    `(function(){var opts=[].slice.call(document.querySelectorAll('mat-option,[role=option],#station-listbox li'));` +
+    `var vis=opts.filter(function(o){return o.offsetWidth>0&&o.offsetHeight>0&&(o.textContent||'').toUpperCase().indexOf('${code}')>-1});` +
+    `var t=vis[0];if(!t)return 'novis|total='+opts.length;t.scrollIntoView();` +
+    `['pointerdown','mousedown','mouseup','click'].forEach(function(ev){t.dispatchEvent(new MouseEvent(ev,{bubbles:true,cancelable:true,view:window}))});` +
+    `var codes=[].slice.call(document.querySelectorAll('input[name=stationSearchCode]')).map(function(i){return i.value}).filter(Boolean);` +
+    `return 'clk:'+(t.textContent||'').replace(/\\s+/g,' ').trim().slice(0,24)+'|codes='+JSON.stringify(codes);})()`;
 
   const jsScenario = {
     instructions: [
       { wait: 8000 },
       { fill: ['input[aria-label="From station"]', fromCity] },
       { wait: 3500 },
-      { evaluate: kbdSelect("From station") },
+      { evaluate: clickVisible(origin) },
       { wait: 1500 },
       { fill: ['input[aria-label="To station"]', toCity] },
       { wait: 3500 },
-      { evaluate: kbdSelect("To station") },
+      { evaluate: clickVisible(destination) },
       { wait: 1500 },
       { fill: ['input[placeholder="MM/DD/YYYY"]', `${mo}/${d}/${y}`] },
       { wait: 1000 },
