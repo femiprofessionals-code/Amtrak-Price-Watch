@@ -66,6 +66,28 @@ async function ingest(fares) {
 
 const SCRAPINGBEE_API_KEY = process.env.SCRAPINGBEE_API_KEY;
 
+// Amtrak station code → Wanderu city slug (state/city). Wanderu lists real
+// Amtrak fares per route and, unlike amtrak.com, is scrapable.
+const WANDERU_SLUG = {
+  NYP: "us-ny/new-york", NWK: "us-nj/newark", PHL: "us-pa/philadelphia",
+  WAS: "us-dc/washington", BAL: "us-md/baltimore", BOS: "us-ma/boston",
+  BBY: "us-ma/boston", PVD: "us-ri/providence", NHV: "us-ct/new-haven",
+  WIL: "us-de/wilmington", RVR: "us-va/richmond", ALB: "us-ny/albany",
+  CHI: "us-il/chicago", MKE: "us-wi/milwaukee", STL: "us-mo/st-louis",
+  MSP: "us-mn/saint-paul", DET: "us-mi/detroit", CLE: "us-oh/cleveland",
+  PGH: "us-pa/pittsburgh", CIN: "us-oh/cincinnati", IND: "us-in/indianapolis",
+  KCY: "us-mo/kansas-city", DEN: "us-co/denver", SLC: "us-ut/salt-lake-city",
+  LAX: "us-ca/los-angeles", SAN: "us-ca/san-diego", SNA: "us-ca/santa-ana",
+  SBA: "us-ca/santa-barbara", SJC: "us-ca/san-jose", EMY: "us-ca/emeryville",
+  SAC: "us-ca/sacramento", PDX: "us-or/portland", SEA: "us-wa/seattle",
+  ATL: "us-ga/atlanta", CLT: "us-nc/charlotte", RGH: "us-nc/raleigh",
+  SAV: "us-ga/savannah", JAX: "us-fl/jacksonville", ORL: "us-fl/orlando",
+  TPA: "us-fl/tampa", MIA: "us-fl/miami", NOL: "us-la/new-orleans",
+  HOU: "us-tx/houston", DAL: "us-tx/dallas", AUS: "us-tx/austin",
+  SAS: "us-tx/san-antonio", ABQ: "us-nm/albuquerque", FLG: "us-az/flagstaff",
+  TUS: "us-az/tucson", PHX: "us-az/maricopa",
+};
+
 /** Extract {seatClass -> priceCents} from a rendered results-page HTML string. */
 function extractFaresFromHtml(html) {
   const fares = {};
@@ -94,6 +116,52 @@ function extractFaresFromHtml(html) {
  * one billed request per scrape. The residential IP should un-neuter the
  * booking app that Amtrak degrades for datacenter IPs.
  */
+/**
+ * Fetch real Amtrak fares from Wanderu (which aggregates Amtrak pricing) via
+ * ScrapingBee. Wanderu is server-rendered and scrapable, unlike amtrak.com.
+ */
+async function scrapeViaWanderu(origin, destination, date) {
+  const o = WANDERU_SLUG[origin];
+  const d = WANDERU_SLUG[destination];
+  if (!o || !d) {
+    log(`  [wanderu] no slug for ${origin} or ${destination}`);
+    return null;
+  }
+  const target = `https://www.wanderu.com/en-us/train/${o}/${d}/`;
+  const params = new URLSearchParams({
+    api_key: SCRAPINGBEE_API_KEY,
+    url: target,
+    render_js: "true",
+    premium_proxy: "true",
+    country_code: "us",
+    wait: "6000",
+    timeout: "120000",
+  });
+  log(`  [wanderu] fetching ${target}`);
+  const res = await fetch(`https://app.scrapingbee.com/api/v1/?${params}`);
+  const cost = res.headers.get("spb-cost");
+  log(`  [wanderu] status=${res.status} cost=${cost}`);
+  if (!res.ok) {
+    log(`  [wanderu] error: ${(await res.text()).slice(0, 200)}`);
+    return null;
+  }
+  const html = await res.text();
+  const title = (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || "?";
+  // Amounts appearing as $NN or $NN.NN across the page.
+  const amounts = [...html.matchAll(/\$\s?(\d{1,4})(?:\.(\d{2}))?/g)]
+    .map((m) => Math.round(parseFloat(m[1] + "." + (m[2] || "00")) * 100))
+    .filter((c) => c >= 500 && c <= 200000);
+  const acela = /acela/i.test(html);
+  log(`  [wanderu] title="${title}" amounts=${JSON.stringify([...new Set(amounts)].slice(0, 15))} acela=${acela}`);
+  if (!amounts.length) return null;
+
+  // Lowest fare = Coach. If Acela is mentioned, its (higher) fares map to First.
+  const sorted = [...new Set(amounts)].sort((a, b) => a - b);
+  const fares = { COACH: sorted[0] };
+  if (acela && sorted.length > 1) fares.FIRST = sorted[sorted.length - 1];
+  return fares;
+}
+
 async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
   const [y, mo, d] = date.split("-");
   const fromCity = cityHints[origin] || origin;
@@ -610,7 +678,9 @@ async function main() {
     // the in-browser strategies are a fallback for local/no-key runs.
     let fares = null;
     if (SCRAPINGBEE_API_KEY) {
-      fares = await scrapeViaScrapingBee(origin, destination, date, CITY);
+      // Wanderu aggregates real Amtrak fares and is scrapable; amtrak.com's
+      // form is not automatable, so Wanderu is the primary real-data source.
+      fares = await scrapeViaWanderu(origin, destination, date);
     } else {
       fares = await scrapeViaApi(page, origin, destination, date);
       if (!fares) fares = await scrapeViaUi(page, origin, destination, date, CITY);
