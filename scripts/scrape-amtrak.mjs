@@ -154,7 +154,111 @@ async function scrapeViaUi(page, origin, destination, date) {
   return Object.keys(fares).length > 0 ? fares : null;
 }
 
+/**
+ * Recon mode (DEBUG_QUERY=RECON): dump the live search form's real structure
+ * — inputs, comboboxes, custom elements, shadow roots, the station autocomplete
+ * dropdown, and candidate submit buttons — so the driver can be written from
+ * facts rather than guesses.
+ */
+async function recon(page) {
+  log("RECON: loading amtrak.com home…");
+  await page.goto("https://www.amtrak.com/home.html", { waitUntil: "domcontentloaded", timeout: 60000 });
+  await page.waitForTimeout(9000);
+  log(`RECON: title="${await page.title()}"`);
+
+  const structure = await page.evaluate(() => {
+    const out = { inputs: [], comboboxes: [], customEls: [], buttons: [], shadowHosts: [] };
+    const desc = (el) => ({
+      tag: el.tagName.toLowerCase(),
+      id: el.id || undefined,
+      name: el.getAttribute("name") || undefined,
+      type: el.getAttribute("type") || undefined,
+      placeholder: el.getAttribute("placeholder") || undefined,
+      ariaLabel: el.getAttribute("aria-label") || undefined,
+      role: el.getAttribute("role") || undefined,
+      ariaControls: el.getAttribute("aria-controls") || undefined,
+      autocomplete: el.getAttribute("autocomplete") || undefined,
+      cls: (el.className && typeof el.className === "string" ? el.className : "").slice(0, 80) || undefined,
+      visible: !!(el.offsetWidth || el.offsetHeight),
+    });
+    document.querySelectorAll("input, textarea").forEach((el) => out.inputs.push(desc(el)));
+    document
+      .querySelectorAll('[role="combobox"], [aria-autocomplete], [aria-haspopup="listbox"]')
+      .forEach((el) => out.comboboxes.push(desc(el)));
+    // Custom elements (hyphenated tag names) — Amtrak uses web components.
+    document.querySelectorAll("*").forEach((el) => {
+      const t = el.tagName.toLowerCase();
+      if (t.includes("-") && !out.customEls.some((c) => c.tag === t)) {
+        out.customEls.push({ tag: t, cls: (typeof el.className === "string" ? el.className : "").slice(0, 60) });
+      }
+      if (el.shadowRoot) out.shadowHosts.push(t);
+    });
+    document.querySelectorAll('button, [role="button"], a').forEach((el) => {
+      const text = (el.textContent || "").trim().slice(0, 40);
+      if (/find|train|search|book/i.test(text)) out.buttons.push({ ...desc(el), text });
+    });
+    return out;
+  });
+
+  log("RECON inputs: " + JSON.stringify(structure.inputs).slice(0, 1800));
+  log("RECON comboboxes: " + JSON.stringify(structure.comboboxes).slice(0, 1200));
+  log("RECON customEls: " + JSON.stringify(structure.customEls.slice(0, 40)));
+  log("RECON shadowHosts: " + JSON.stringify([...new Set(structure.shadowHosts)]));
+  log("RECON find/train buttons: " + JSON.stringify(structure.buttons).slice(0, 1000));
+
+  // Try to open the "From" station field and capture the autocomplete list.
+  const fromGuesses = [
+    '[aria-label*="From" i]',
+    '[placeholder*="From" i]',
+    '#mmb-origin',
+    'input[name*="origin" i]',
+    '[id*="origin" i]',
+    '[data-testid*="origin" i]',
+  ];
+  for (const sel of fromGuesses) {
+    const el = await page.$(sel);
+    if (!el) continue;
+    log(`RECON: found origin candidate "${sel}" — typing "New York"`);
+    try {
+      await el.click();
+      await el.type("New York", { delay: 120 });
+      await page.waitForTimeout(4000);
+      const dd = await page.evaluate(() => {
+        const opts = [...document.querySelectorAll('[role="option"], li, [class*="option" i], [class*="result" i], [class*="suggest" i]')]
+          .map((el) => ({
+            tag: el.tagName.toLowerCase(),
+            role: el.getAttribute("role") || undefined,
+            cls: (typeof el.className === "string" ? el.className : "").slice(0, 60),
+            text: (el.textContent || "").trim().slice(0, 50),
+          }))
+          .filter((o) => o.text && /new york|NYP|penn|moynihan/i.test(o.text))
+          .slice(0, 12);
+        return opts;
+      });
+      log(`RECON autocomplete via "${sel}": ${JSON.stringify(dd)}`);
+      if (dd.length) break;
+    } catch (e) {
+      log(`RECON: "${sel}" interaction failed: ${e.message?.slice(0, 120)}`);
+    }
+  }
+  log("RECON complete.");
+}
+
 async function main() {
+  if (DEBUG_QUERY === "RECON") {
+    const browser = await chromium.launch({ args: ["--disable-blink-features=AutomationControlled"] });
+    const context = await browser.newContext({
+      userAgent:
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36",
+      viewport: { width: 1440, height: 900 },
+      locale: "en-US",
+      timezoneId: "America/New_York",
+    });
+    await recon(await context.newPage());
+    await browser.close();
+    return;
+  }
+
   let queries;
   if (DEBUG_QUERY) {
     const [o, dst, date] = DEBUG_QUERY.split(",");
