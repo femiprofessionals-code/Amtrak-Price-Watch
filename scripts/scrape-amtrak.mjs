@@ -184,11 +184,29 @@ async function beFetch(url, extra = {}) {
   return { ok: res.ok, status: res.status, cost, body };
 }
 
+/** Extract every embedded trip {priceCents, mm, dd, yyyy, params} from Wanderu HTML. */
+function parseWanderuTrips(html) {
+  // Each trip object carries "price":NN.NN … "spider_params":"O,V,D,MM_||_DD_||_YYYY".
+  const trips = [];
+  const re = /"price"\s*:\s*([\d.]+)[\s\S]{0,400}?"spider_params"\s*:\s*"([^"]*?)(\d{2})_\|\|_(\d{2})_\|\|_(\d{4})"/g;
+  let m;
+  while ((m = re.exec(html))) {
+    trips.push({
+      priceCents: Math.round(parseFloat(m[1]) * 100),
+      params: m[2],
+      mm: m[3],
+      dd: m[4],
+      yyyy: m[5],
+      iso: `${m[5]}-${m[3]}-${m[4]}`,
+    });
+  }
+  return trips;
+}
+
 /**
- * RECON: probe how Wanderu exposes DATE-SPECIFIC fares. Tries a couple of dated
- * URL shapes and dumps what a real render returns — the embedded __NEXT_DATA__
- * JSON keys, any "time … $price" departure rows, and the redirected URL — so we
- * can see where per-departure prices live before writing the real parser.
+ * RECON v2: capture Wanderu's XHR/fetch calls (to find the date-search API) and
+ * map every embedded trip to the date it belongs to, so we can see whether a
+ * dated URL actually returns results for the requested day.
  */
 async function wanderuReconDated(origin, destination, date) {
   const o = WANDERU_SLUG[origin];
@@ -197,60 +215,60 @@ async function wanderuReconDated(origin, destination, date) {
     log(`  [wrecon] no slug for ${origin} or ${destination}`);
     return;
   }
-  const base = `https://www.wanderu.com/en-us/train/${o}/${d}/`;
-  const candidates = [
-    `${base}?date=${date}`,
-    `${base}${date}/`,
-    `${base}?outbound=${date}`,
-  ];
-  for (const url of candidates) {
-    log(`  [wrecon] --- fetching ${url}`);
-    let r;
-    try {
-      r = await beFetch(url);
-    } catch (e) {
-      log(`  [wrecon] fetch threw: ${String(e).slice(0, 160)}`);
-      continue;
-    }
-    log(`  [wrecon] status=${r.status} cost=${r.cost} len=${r.body.length}`);
-    if (!r.ok) {
-      log(`  [wrecon] error body: ${r.body.slice(0, 200)}`);
-      continue;
-    }
-    const html = r.body;
-    const title = (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || "?";
-    // Canonical/redirect target tells us the URL shape Wanderu actually uses.
-    const canonical = (html.match(/<link[^>]+rel=["']canonical["'][^>]+href=["']([^"']+)["']/i) || [])[1] || "?";
-    const ogUrl = (html.match(/property=["']og:url["'][^>]+content=["']([^"']+)["']/i) || [])[1] || "?";
-    log(`  [wrecon] title="${title}"`);
-    log(`  [wrecon] canonical=${canonical}`);
-    log(`  [wrecon] og:url=${ogUrl}`);
-
-    // Does the page contain the requested date anywhere (confirms date took)?
-    log(`  [wrecon] contains date "${date}": ${html.includes(date)}`);
-    // Departure-time + nearby price rows — the shape we'd parse for per-date fares.
-    const timePrice = [
-      ...html.matchAll(/(\d{1,2}:\d{2}\s?(?:AM|PM|am|pm))[\s\S]{0,120}?\$\s?(\d{1,4})/g),
-    ].slice(0, 8).map((m) => `${m[1]}→$${m[2]}`);
-    log(`  [wrecon] time→price rows: ${JSON.stringify(timePrice)}`);
-
-    // __NEXT_DATA__ / embedded JSON: list the interesting price/trip keys present.
-    const nextData = html.match(/<script id="__NEXT_DATA__"[^>]*>([\s\S]*?)<\/script>/i);
-    if (nextData) {
-      const j = nextData[1];
-      log(`  [wrecon] __NEXT_DATA__ len=${j.length}`);
-      const keys = [...new Set([...j.matchAll(/"([a-zA-Z]*[Pp]rice[a-zA-Z]*|departTime|departureTime|arriveTime|trips|itineraries|legs|operator|carrier|amount|fare[a-zA-Z]*)"\s*:/g)].map((m) => m[1]))];
-      log(`  [wrecon] JSON keys of interest: ${JSON.stringify(keys.slice(0, 40))}`);
-      // Show a slice around the first price occurrence for structure.
-      const pIdx = j.search(/"(price|amount|lowestPrice)"\s*:/i);
-      if (pIdx >= 0) log(`  [wrecon] price context: ${j.slice(Math.max(0, pIdx - 80), pIdx + 200).replace(/\s+/g, " ")}`);
-    } else {
-      log(`  [wrecon] no __NEXT_DATA__; scanning inline JSON for price keys`);
-      const pIdx = html.search(/"(price|lowestPrice|amount)"\s*:/i);
-      if (pIdx >= 0) log(`  [wrecon] inline price context: ${html.slice(Math.max(0, pIdx - 80), pIdx + 200).replace(/\s+/g, " ")}`);
-    }
-    await new Promise((r) => setTimeout(r, 1500));
+  const [yy, mm, dd] = date.split("-");
+  const encoded = `${mm}_||_${dd}_||_${yy}`; // spider_params date form
+  const url = `https://www.wanderu.com/en-us/train/${o}/${d}/?date=${date}`;
+  log(`  [wrecon] fetching (json_response) ${url}`);
+  const params = new URLSearchParams({
+    api_key: SCRAPINGBEE_API_KEY,
+    url,
+    render_js: "true",
+    premium_proxy: "true",
+    country_code: "us",
+    json_response: "true",
+    wait: "14000",
+    timeout: "140000",
+  });
+  const res = await fetch(`https://app.scrapingbee.com/api/v1/?${params}`);
+  log(`  [wrecon] status=${res.status} cost=${res.headers.get("spb-cost")}`);
+  const raw = await res.text();
+  if (!res.ok) {
+    log(`  [wrecon] error: ${raw.slice(0, 300)}`);
+    return;
   }
+  let data;
+  try {
+    data = JSON.parse(raw);
+  } catch {
+    log(`  [wrecon] not JSON (len=${raw.length}); treating as HTML`);
+    data = { body: raw };
+  }
+  log(`  [wrecon] top-level keys: ${JSON.stringify(Object.keys(data))}`);
+
+  // 1) XHR calls captured during render — hunt for the search/fare API.
+  const xhr = data.xhr || data.xhr_responses || [];
+  log(`  [wrecon] xhr count: ${Array.isArray(xhr) ? xhr.length : "n/a"}`);
+  if (Array.isArray(xhr)) {
+    const interesting = xhr
+      .map((x) => `${x.method || "?"} ${(x.url || "").slice(0, 160)}`)
+      .filter((u) => /search|fare|price|trip|schedule|result|api|graphql|content\.wanderu|rome2|book/i.test(u));
+    for (const u of interesting.slice(0, 25)) log(`  [wrecon] xhr: ${u}`);
+    if (interesting.length === 0) {
+      // Nothing matched — dump the first handful of URLs so we can eyeball them.
+      for (const x of xhr.slice(0, 20)) log(`  [wrecon] xhr(all): ${(x.method || "?")} ${(x.url || "").slice(0, 160)}`);
+    }
+  }
+
+  // 2) Map embedded trips to their dates.
+  const html = data.body || raw;
+  log(`  [wrecon] html len=${html.length}, requested encoded date=${encoded}`);
+  const trips = parseWanderuTrips(html);
+  log(`  [wrecon] embedded trips: ${trips.length}`);
+  const byDate = {};
+  for (const t of trips) byDate[t.iso] = (byDate[t.iso] || 0) + 1;
+  log(`  [wrecon] trip dates present: ${JSON.stringify(byDate)}`);
+  const forDate = trips.filter((t) => t.iso === date);
+  log(`  [wrecon] trips for requested ${date}: ${forDate.length} → prices ${JSON.stringify(forDate.map((t) => t.priceCents).slice(0, 20))}`);
 }
 
 async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
