@@ -12,7 +12,21 @@
  *   DEBUG_QUERY   optional "NYP,WAS,2026-08-20" — scrape one query and dump
  *                 diagnostics instead of talking to the app
  */
-import { chromium } from "playwright";
+// Stealth browser: playwright-extra + the stealth plugin patch the headless
+// fingerprints (navigator.webdriver, chrome runtime, WebGL vendor, etc.) that
+// Amtrak's Akamai bot-shield shows the real dropdown / API only to "human"
+// sessions. Falls back to plain playwright if the plugins aren't installed.
+let chromium;
+try {
+  const extra = await import("playwright-extra");
+  const stealth = (await import("puppeteer-extra-plugin-stealth")).default;
+  chromium = extra.chromium;
+  chromium.use(stealth());
+  console.log("using playwright-extra + stealth");
+} catch (e) {
+  chromium = (await import("playwright")).chromium;
+  console.log("stealth unavailable, using plain playwright:", e?.message?.slice(0, 80));
+}
 
 const APP_URL = process.env.APP_URL?.replace(/\/$/, "");
 const CRON_SECRET = process.env.CRON_SECRET;
@@ -201,6 +215,25 @@ async function scrapeViaUi(page, origin, destination, date, cityHints = {}) {
   const fromCity = cityHints[origin] || origin;
   const toCity = cityHints[destination] || destination;
 
+  // Capture Amtrak's own fare JSON straight off the wire — if the search runs,
+  // this is the real prize regardless of how the results page renders.
+  const captured = [];
+  const onResp = async (resp) => {
+    try {
+      const url = resp.url();
+      if (!/journey|fare|search|travel|trip|avail|price/i.test(url)) return;
+      const ct = (resp.headers()["content-type"] || "").toLowerCase();
+      if (!ct.includes("json")) return;
+      const body = await resp.text();
+      if (/(fare|price|amount|lowestPrice|dollars)/i.test(body)) {
+        captured.push({ url: url.slice(0, 90), status: resp.status(), body: body.slice(0, 400) });
+      }
+    } catch {
+      /* ignore */
+    }
+  };
+  page.on("response", onResp);
+
   try {
     log(`  [ui] From ← ${fromCity} (${origin})`);
     await fillStation(page, "From station", fromCity, origin);
@@ -238,7 +271,12 @@ async function scrapeViaUi(page, origin, destination, date, cityHints = {}) {
   // Wait for navigation to the results view.
   await page.waitForLoadState("domcontentloaded").catch(() => {});
   await page.waitForTimeout(18000);
+  page.off("response", onResp);
   log(`  [ui] after submit url=${page.url()}`);
+  log(`  [ui] captured ${captured.length} fare-ish responses`);
+  for (const c of captured.slice(0, 3)) {
+    log(`  [ui] wire: ${c.status} ${c.url} :: ${c.body.replace(/\s+/g, " ")}`);
+  }
 
   // Diagnostics + extraction from the results page.
   const diag = await page.evaluate(() => {
