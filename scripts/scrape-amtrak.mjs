@@ -100,25 +100,16 @@ async function scrapeViaScrapingBee(origin, destination, date) {
     `https://www.amtrak.com/tickets/departure.html?wdf_origin=${origin}` +
     `&wdf_destination=${destination}&departureDate=${mo}-${d}-${y}&numAdults=1`;
 
-  // js_scenario: wait for the SPA, then wait for any fare/price to appear.
-  const jsScenario = {
-    instructions: [
-      { wait: 6000 },
-      { wait_for: "body" },
-      { wait: 12000 },
-      { scroll_y: 600 },
-      { wait: 3000 },
-    ],
-  };
-
   const params = new URLSearchParams({
     api_key: SCRAPINGBEE_API_KEY,
     url: target,
     render_js: "true",
     stealth_proxy: "true",
     country_code: "us",
-    wait: "3000",
-    js_scenario: JSON.stringify(jsScenario),
+    // Single modest wait for the SPA to render fares; keep well under the
+    // gateway timeout. block_resources defaults on (skips images) → faster.
+    wait: "14000",
+    timeout: "120000",
   });
 
   const endpoint = `https://app.scrapingbee.com/api/v1/?${params}`;
