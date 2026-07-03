@@ -104,27 +104,23 @@ async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
   // native value setter + input event (Angular ngModel reacts to that), then
   // dispatch a full mouse sequence on the matching option. Each step returns a
   // diagnostic string surfaced in evaluate_results (json_response=true).
-  const type = (label, val) =>
-    `(function(){var i=document.querySelector('input[aria-label="${label}"]');if(!i)return 'noinput:${label}';` +
-    `i.focus();var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;` +
-    `s.call(i,'${val}');i.dispatchEvent(new Event('input',{bubbles:true}));` +
-    `i.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'a'}));return 'typed:${label}='+i.value;})()`;
-  // Options are real-size now (premium proxy), so a trusted ScrapingBee click
-  // by XPath (option containing the station code) properly commits Angular.
+  // Real-size elements under premium proxy → use ScrapingBee's real fill()
+  // (properly links to Angular's form control) then a trusted click on the
+  // option by XPath, so the station commits (not just the visible text).
   const optXPath = (code) => `//*[@role="option"][contains(.,"(${code})")]`;
 
   const jsScenario = {
     instructions: [
       { wait: 8000 },
-      { evaluate: type("From station", fromCity) },
+      { fill: ['input[aria-label="From station"]', fromCity] },
       { wait: 3500 },
       { wait_for_and_click: optXPath(origin) },
       { wait: 1500 },
-      { evaluate: type("To station", toCity) },
+      { fill: ['input[aria-label="To station"]', toCity] },
       { wait: 3500 },
       { wait_for_and_click: optXPath(destination) },
       { wait: 1500 },
-      { evaluate: `(function(){var i=document.querySelector('input[placeholder="MM/DD/YYYY"]');if(!i)return 'nodate';i.focus();var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;s.call(i,'${mo}/${d}/${y}');i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}));i.blur();return 'date='+i.value;})()` },
+      { fill: ['input[placeholder="MM/DD/YYYY"]', `${mo}/${d}/${y}`] },
       { wait: 1000 },
       { wait_for_and_click: `//button[@type="submit"][@aria-label="FIND TRIP"]` },
       { wait: 16000 },
