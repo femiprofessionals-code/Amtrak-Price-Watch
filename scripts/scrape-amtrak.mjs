@@ -109,30 +109,26 @@ async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
     `i.focus();var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;` +
     `s.call(i,'${val}');i.dispatchEvent(new Event('input',{bubbles:true}));` +
     `i.dispatchEvent(new KeyboardEvent('keyup',{bubbles:true,key:'a'}));return 'typed:${label}='+i.value;})()`;
-  const pick = (code) =>
-    `(function(){var o=[].slice.call(document.querySelectorAll('#station-listbox [role=option],#station-listbox li'));` +
-    `if(!o.length)return 'noopts';var m=o.filter(function(e){return (e.textContent||'').toUpperCase().indexOf('${code}')>-1})[0]||o[0];` +
-    `var r=m.getBoundingClientRect();['pointerdown','mousedown','mouseup','click'].forEach(function(ev){` +
-    `m.dispatchEvent(new MouseEvent(ev,{bubbles:true,cancelable:true}))});` +
-    `return 'pick:'+(m.textContent||'').replace(/\\s+/g,' ').trim().slice(0,30)+'|n='+o.length+'|wh='+Math.round(r.width)+'x'+Math.round(r.height);})()`;
+  // Options are real-size now (premium proxy), so a trusted ScrapingBee click
+  // by XPath (option containing the station code) properly commits Angular.
+  const optXPath = (code) => `//*[@role="option"][contains(.,"(${code})")]`;
 
   const jsScenario = {
     instructions: [
       { wait: 8000 },
       { evaluate: type("From station", fromCity) },
       { wait: 3500 },
-      { evaluate: pick(origin) },
+      { wait_for_and_click: optXPath(origin) },
       { wait: 1500 },
       { evaluate: type("To station", toCity) },
       { wait: 3500 },
-      { evaluate: pick(destination) },
+      { wait_for_and_click: optXPath(destination) },
       { wait: 1500 },
-      { evaluate: type("Departure date. Format: mm slash dd slash yyyy", `${mo}/${d}/${y}`) },
-      { evaluate: `(function(){var i=document.querySelector('input[placeholder="MM/DD/YYYY"]');if(!i)return 'nodate';i.focus();var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;s.call(i,'${mo}/${d}/${y}');i.dispatchEvent(new Event('input',{bubbles:true}));return 'date='+i.value;})()` },
+      { evaluate: `(function(){var i=document.querySelector('input[placeholder="MM/DD/YYYY"]');if(!i)return 'nodate';i.focus();var s=Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value').set;s.call(i,'${mo}/${d}/${y}');i.dispatchEvent(new Event('input',{bubbles:true}));i.dispatchEvent(new Event('change',{bubbles:true}));i.blur();return 'date='+i.value;})()` },
       { wait: 1000 },
-      { evaluate: `(function(){var b=document.querySelector('button[type=submit][aria-label="FIND TRIP"]');if(!b)return 'nosubmit';b.click();return 'submitted';})()` },
-      { wait: 13000 },
-      { evaluate: `(function(){var p=(document.body.innerText.match(/\\$\\s?\\d{2,4}/g)||[]).slice(0,12);return 'url='+location.pathname+'|prices='+(p.join(',')||'none');})()` },
+      { wait_for_and_click: `//button[@type="submit"][@aria-label="FIND TRIP"]` },
+      { wait: 16000 },
+      { evaluate: `(function(){var p=(document.body.innerText.match(/\\$\\s?\\d{2,4}/g)||[]).slice(0,12);return 'url='+location.pathname+'|err='+((document.body.innerText.match(/enter a valid station|select a date|required/gi)||[]).join(',')||'none')+'|prices='+(p.join(',')||'none');})()` },
     ],
   };
 
