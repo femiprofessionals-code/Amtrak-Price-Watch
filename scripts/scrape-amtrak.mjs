@@ -163,6 +163,14 @@ async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
   const html = typeof data.body === "string" ? data.body : "";
   const dollarHits = (html.match(/\$\s?\d{2,4}/g) || []).slice(0, 12);
   log(`  [bee] html len=${html.length} dollars=${JSON.stringify(dollarHits)}`);
+  // Reveal Amtrak's own backend API calls (station/fare/journey) so we can
+  // consider calling the fare endpoint directly through the residential proxy.
+  const xhr = Array.isArray(data.xhr) ? data.xhr : [];
+  const apiCalls = xhr
+    .map((x) => `${x.method || "?"} ${x.status || "?"} ${(x.url || "").slice(0, 110)}`)
+    .filter((u) => /journey|fare|search|station|travel|trip|avail|price|booking/i.test(u))
+    .slice(0, 12);
+  log(`  [bee] xhr(${xhr.length}) api=${JSON.stringify(apiCalls)}`);
 
   const fares = extractFaresFromHtml(html);
   return Object.keys(fares).length ? fares : null;
