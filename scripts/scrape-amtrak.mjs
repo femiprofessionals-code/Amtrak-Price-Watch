@@ -142,18 +142,29 @@ async function fillStation(page, ariaLabel, city, code) {
     return false;
   }
 
-  // Select the option matching the station code (raw DOM click bypasses the
-  // actionability checks that block 0-size elements). Log what we pick.
-  const picked = await page.evaluate((code) => {
+  // Angular Material autocompletes commit reliably on keyboard selection, not
+  // synthetic clicks. Find the index of the option matching the station code,
+  // arrow down to it, and press Enter.
+  const idx = await page.evaluate((code) => {
     const opts = [...document.querySelectorAll('#station-listbox [role="option"], #station-listbox li')];
-    const match = opts.find((el) => (el.textContent || "").toUpperCase().includes(code)) || opts[0];
-    if (!match) return null;
-    match.click();
-    return (match.textContent || "").replace(/\s+/g, " ").trim().slice(0, 60);
+    const i = opts.findIndex((el) => (el.textContent || "").toUpperCase().includes(code));
+    return i >= 0 ? i : opts.length ? 0 : -1;
   }, code);
-  log(`    [field ${ariaLabel}] picked: ${JSON.stringify(picked)}`);
-  await page.waitForTimeout(800);
-  return picked != null;
+  if (idx < 0) {
+    await page.keyboard.press("Enter");
+    return false;
+  }
+  for (let i = 0; i <= idx; i++) {
+    await page.keyboard.press("ArrowDown");
+    await page.waitForTimeout(120);
+  }
+  await page.keyboard.press("Enter");
+  await page.waitForTimeout(900);
+
+  // Read back the committed value to confirm the selection stuck.
+  const committed = await field.evaluate((el) => el.value).catch(() => "");
+  log(`    [field ${ariaLabel}] committed value=${JSON.stringify(committed)}`);
+  return /\w/.test(committed);
 }
 
 /**
@@ -183,8 +194,12 @@ async function scrapeViaUi(page, origin, destination, date, cityHints = {}) {
   try {
     log(`  [ui] From ← ${fromCity} (${origin})`);
     await fillStation(page, "From station", fromCity, origin);
+    await page.keyboard.press("Escape"); // close From overlay before To
+    await page.waitForTimeout(600);
     log(`  [ui] To ← ${toCity} (${destination})`);
     await fillStation(page, "To station", toCity, destination);
+    await page.keyboard.press("Escape");
+    await page.waitForTimeout(400);
 
     log(`  [ui] date ← ${m}/${d}/${y}`);
     const dateField = page.locator('input[placeholder="MM/DD/YYYY"]').first();
