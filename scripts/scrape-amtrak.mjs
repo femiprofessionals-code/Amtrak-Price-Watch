@@ -147,18 +147,27 @@ async function scrapeViaWanderu(origin, destination, date) {
   }
   const html = await res.text();
   const title = (html.match(/<title>([^<]*)<\/title>/i) || [])[1] || "?";
-  // Amounts appearing as $NN or $NN.NN across the page.
-  const amounts = [...html.matchAll(/\$\s?(\d{1,4})(?:\.(\d{2}))?/g)]
-    .map((m) => Math.round(parseFloat(m[1] + "." + (m[2] || "00")) * 100))
-    .filter((c) => c >= 500 && c <= 200000);
-  const acela = /acela/i.test(html);
-  log(`  [wanderu] title="${title}" amounts=${JSON.stringify([...new Set(amounts)].slice(0, 15))} acela=${acela}`);
-  if (!amounts.length) return null;
 
-  // Lowest fare = Coach. If Acela is mentioned, its (higher) fares map to First.
-  const sorted = [...new Set(amounts)].sort((a, b) => a - b);
-  const fares = { COACH: sorted[0] };
-  if (acela && sorted.length > 1) fares.FIRST = sorted[sorted.length - 1];
+  // Prefer the fare in the page's own "from $NN" / meta description — that's
+  // Wanderu's advertised lowest Amtrak fare for the route (avoids stray $ like
+  // fees/discounts). Fall back to the modal set of plausible train fares.
+  const fromMatch = html.match(/from\s*\$\s?(\d{1,4})\b/i) || html.match(/\$\s?(\d{1,4})\+/);
+  const allCents = [...html.matchAll(/\$\s?(\d{1,4})(?:\.(\d{2}))?/g)]
+    .map((m) => Math.round(parseFloat(m[1] + "." + (m[2] || "00")) * 100))
+    // Real Amtrak fares sit ~$15–$400 for most routes, higher for cross-country.
+    .filter((c) => c >= 1500 && c <= 60000);
+  const acela = /acela/i.test(html);
+  const uniq = [...new Set(allCents)].sort((a, b) => a - b);
+  log(`  [wanderu] title="${title}" from=$${fromMatch ? fromMatch[1] : "?"} fares=${JSON.stringify(uniq.slice(0, 15))} acela=${acela}`);
+
+  const lowest = fromMatch ? Math.round(parseFloat(fromMatch[1]) * 100) : uniq[0];
+  if (!lowest) return null;
+
+  const fares = { COACH: lowest };
+  // Acela (premium) fares are the upper cluster; map the max plausible to First.
+  if (acela && uniq.length > 1 && uniq[uniq.length - 1] > lowest) {
+    fares.FIRST = uniq[uniq.length - 1];
+  }
   return fares;
 }
 
