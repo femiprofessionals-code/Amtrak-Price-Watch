@@ -156,10 +156,12 @@ async function scrapeViaScrapingBee(origin, destination, date, cityHints = {}) {
     return null;
   }
   const data = await res.json();
-  log(`  [bee] cost=${data.cost ?? "?"} evaluate_results=${JSON.stringify(data.evaluate_results || []).slice(0, 400)}`);
+  log(`  [bee] cost=${data.cost ?? "?"} keys=${JSON.stringify(Object.keys(data))}`);
+  log(`  [bee] evaluate_results=${JSON.stringify(data.evaluate_results || []).slice(0, 500)}`);
+  log(`  [bee] js_scenario_report=${JSON.stringify(data.js_scenario_report || {}).slice(0, 900)}`);
   const html = typeof data.body === "string" ? data.body : "";
   const dollarHits = (html.match(/\$\s?\d{2,4}/g) || []).slice(0, 12);
-  log(`  [bee] html dollars=${JSON.stringify(dollarHits)}`);
+  log(`  [bee] html len=${html.length} dollars=${JSON.stringify(dollarHits)}`);
 
   const fares = extractFaresFromHtml(html);
   return Object.keys(fares).length ? fares : null;
