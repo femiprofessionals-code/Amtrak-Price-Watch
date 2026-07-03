@@ -8,7 +8,7 @@ name: Price monitoring
 # secret configured in Vercel.
 on:
   schedule:
-    - cron: "*/30 * * * *" # every 30 minutes
+    - cron: "37 */6 * * *" # every 6 hours, 30 min after each scrape — re-evaluates alerts against the fresh fares
   workflow_dispatch: {} # allows manual runs from the Actions tab
 
 jobs:
